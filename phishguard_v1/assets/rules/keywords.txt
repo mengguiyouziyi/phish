@@ -1,0 +1,14 @@
+login
+verify
+verification
+account
+password
+update
+security
+confirm
+reset
+suspend
+invoice
+wallet
+airdrop
+bank
