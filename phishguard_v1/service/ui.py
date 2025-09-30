@@ -551,10 +551,363 @@ def get_url_info(url):
             'path': parsed.path,
             'query': parsed.query,
             'is_https': parsed.scheme == 'https',
-            'has_subdomain': len(parsed.netloc.split('.')) > 2
+            'has_subdomain': len(parsed.netloc.split('.')) > 2,
+            'port': parsed.port,
+            'fragment': parsed.fragment
         }
     except:
         return {}
+
+def smart_url_suggestions(partial_url: str) -> List[str]:
+    """智能URL建议"""
+    if not partial_url or len(partial_url) < 3:
+        return []
+
+    suggestions = []
+
+    # 常见网站前缀补全
+    common_sites = [
+        'google.com',
+        'youtube.com',
+        'facebook.com',
+        'twitter.com',
+        'instagram.com',
+        'linkedin.com',
+        'github.com',
+        'stackoverflow.com',
+        'reddit.com',
+        'wikipedia.org',
+        'amazon.com',
+        'microsoft.com',
+        'apple.com'
+    ]
+
+    partial_lower = partial_url.lower()
+
+    # 如果包含网站名的一部分，建议完整域名
+    for site in common_sites:
+        if partial_lower in site or site in partial_lower:
+            if site not in partial_lower:
+                suggestions.append(f"https://www.{site}")
+
+    # 如果输入看起来像域名，添加常见前缀
+    if '.' not in partial_url and not partial_url.startswith('http'):
+        domain_suggestions = [
+            f"https://www.{partial_url}.com",
+            f"https://{partial_url}.com",
+            f"https://www.{partial_url}.org",
+            f"https://{partial_url}.org"
+        ]
+        suggestions.extend(domain_suggestions[:2])
+
+    # 如果缺少协议，自动添加https
+    if partial_url and not partial_url.startswith(('http://', 'https://')):
+        if '.' in partial_url:
+            suggestions.append(f"https://{partial_url}")
+
+    return list(set(suggestions))[:5]  # 去重并限制为5个建议
+
+def analyze_url_risk_indicators(url: str) -> Dict[str, Any]:
+    """分析URL风险指标"""
+    import re
+    from urllib.parse import urlparse
+
+    risk_indicators = {
+        'suspicious_patterns': [],
+        'risk_score': 0,
+        'warnings': [],
+        'recommendations': []
+    }
+
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        path = parsed.path.lower()
+
+        # 检查可疑模式
+        suspicious_patterns = [
+            (r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', 'IP地址代替域名', 0.7),
+            (r'[0-9]{1,3}[.-][0-9]{1,3}[.-][0-9]{1,3}[.-][0-9]{1,3}', '类IP地址格式', 0.6),
+            (r'[a-z0-9]{20,}', '超长随机字符串', 0.5),
+            (r'(paypal|apple|microsoft|google|amazon|facebook|bank|chase|wellsfargo).*(\.tk|\.ml|\.ga|\.cf|\.gq)', '知名品牌+免费域名', 0.8),
+            (r'(bit\.ly|tinyurl\.com|t\.co|goo\.gl)', '短链接服务', 0.3),
+            (r'(secure|account|login|signin|verify|confirm|update)', '敏感词汇', 0.2),
+            (r'(phish|scam|fake|spam)', '明显恶意词汇', 0.9),
+        ]
+
+        for pattern, description, score in suspicious_patterns:
+            if re.search(pattern, url, re.IGNORECASE):
+                risk_indicators['suspicious_patterns'].append(description)
+                risk_indicators['risk_score'] += score
+
+        # 域名长度检查
+        if len(domain) > 30:
+            risk_indicators['warnings'].append('域名过长')
+            risk_indicators['risk_score'] += 0.2
+
+        # HTTPS检查
+        if parsed.scheme != 'https':
+            risk_indicators['warnings'].append('未使用HTTPS加密')
+            risk_indicators['risk_score'] += 0.3
+            risk_indicators['recommendations'].append('建议使用HTTPS网站')
+
+        # 子域名深度检查
+        subdomain_count = len(domain.split('.')) - 2
+        if subdomain_count > 3:
+            risk_indicators['warnings'].append('子域名层级过深')
+            risk_indicators['risk_score'] += 0.2
+
+        # 特殊字符检查
+        special_chars = len(re.findall(r'[^a-zA-Z0-9.-]', url))
+        if special_chars > 2:
+            risk_indicators['warnings'].append('包含特殊字符')
+            risk_indicators['risk_score'] += 0.1
+
+        # 限制风险分数在0-1之间
+        risk_indicators['risk_score'] = min(risk_indicators['risk_score'], 1.0)
+
+        # 生成建议
+        if risk_indicators['risk_score'] > 0.5:
+            risk_indicators['recommendations'].append('建议谨慎访问此网站')
+        if risk_indicators['risk_score'] > 0.7:
+            risk_indicators['recommendations'].append('强烈建议使用安全软件扫描')
+
+    except Exception as e:
+        risk_indicators['error'] = str(e)
+
+    return risk_indicators
+
+def generate_url_info_html(url: str) -> str:
+    """生成URL信息HTML"""
+    if not url or not url.strip():
+        return """
+        <div class='feature-card glass-effect' style='text-align: center; padding: 1.5rem;'>
+            <div style='font-size: 2rem; margin-bottom: 0.5rem;'>🔗</div>
+            <div style='font-size: 1rem; color: #6b7280; margin-bottom: 0.5rem;'>等待输入URL</div>
+            <div style='font-size: 0.85rem; color: #9ca3af;'>输入网址后自动分析</div>
+        </div>
+        """
+
+    url_info = get_url_info(url)
+    risk_analysis = analyze_url_risk_indicators(url)
+
+    # 生成风险等级样式
+    risk_score = risk_analysis.get('risk_score', 0)
+    if risk_score > 0.7:
+        risk_color = '#ef4444'
+        risk_emoji = '🚨'
+        risk_text = '高风险'
+    elif risk_score > 0.4:
+        risk_color = '#f59e0b'
+        risk_emoji = '⚠️'
+        risk_text = '中风险'
+    else:
+        risk_color = '#22c55e'
+        risk_emoji = '✅'
+        risk_text = '低风险'
+
+    html_parts = [
+        f"""
+        <div class='feature-card glass-effect micro-interact' style='padding: 1.5rem; border-left: 4px solid {risk_color};'>
+            <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;'>
+                <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                    <span style='font-size: 1.3rem;'>🔗</span>
+                    <div style='font-size: 1.1rem; font-weight: 600;'>URL分析</div>
+                </div>
+                <div style='display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0.75rem; background: {risk_color}20; border-radius: 12px; color: {risk_color}; font-weight: 500;'>
+                    <span>{risk_emoji}</span>
+                    <span>{risk_text}</span>
+                    <span>{risk_score*100:.0f}%</span>
+                </div>
+            </div>
+        """,
+        f"""
+            <div style='display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; margin-bottom: 1rem;'>
+                <div style='background: rgba(59, 130, 246, 0.1); padding: 0.75rem; border-radius: 8px;'>
+                    <div style='font-size: 0.8rem; color: #6b7280; margin-bottom: 0.25rem;'>域名</div>
+                    <div style='font-size: 0.9rem; font-weight: 500; word-break: break-all;'>{url_info.get('domain', 'N/A')}</div>
+                </div>
+                <div style='background: rgba(16, 185, 129, 0.1); padding: 0.75rem; border-radius: 8px;'>
+                    <div style='font-size: 0.8rem; color: #6b7280; margin-bottom: 0.25rem;'>协议</div>
+                    <div style='font-size: 0.9rem; font-weight: 500;'>{url_info.get('scheme', 'N/A').upper()}</div>
+                </div>
+                <div style='background: rgba(245, 158, 11, 0.1); padding: 0.75rem; border-radius: 8px;'>
+                    <div style='font-size: 0.8rem; color: #6b7280; margin-bottom: 0.25rem;'>路径</div>
+                    <div style='font-size: 0.9rem; font-weight: 500; word-break: break-all;'>{url_info.get('path', '/')[:30]}{'...' if len(url_info.get('path', '')) > 30 else ''}</div>
+                </div>
+                <div style='background: rgba(139, 92, 246, 0.1); padding: 0.75rem; border-radius: 8px;'>
+                    <div style='font-size: 0.8rem; color: #6b7280; margin-bottom: 0.25rem;'>子域名</div>
+                    <div style='font-size: 0.9rem; font-weight: 500;'>{'是' if url_info.get('has_subdomain') else '否'}</div>
+                </div>
+            </div>
+        """
+    ]
+
+    # 添加风险提示
+    if risk_analysis.get('warnings'):
+        html_parts.append("""
+            <div style='background: rgba(239, 68, 68, 0.1); padding: 0.75rem; border-radius: 8px; margin-bottom: 0.75rem;'>
+                <div style='font-size: 0.85rem; font-weight: 600; color: #dc2626; margin-bottom: 0.25rem;'>⚠️ 风险提示</div>
+        """)
+        for warning in risk_analysis['warnings'][:3]:
+            html_parts.append(f"<div style='font-size: 0.8rem; color: #991b1b;'>• {warning}</div>")
+        html_parts.append("</div>")
+
+    # 添加可疑模式
+    if risk_analysis.get('suspicious_patterns'):
+        html_parts.append("""
+            <div style='background: rgba(245, 158, 11, 0.1); padding: 0.75rem; border-radius: 8px; margin-bottom: 0.75rem;'>
+                <div style='font-size: 0.85rem; font-weight: 600; color: #d97706; margin-bottom: 0.25rem;'>🔍 可疑模式</div>
+        """)
+        for pattern in risk_analysis['suspicious_patterns'][:3]:
+            html_parts.append(f"<div style='font-size: 0.8rem; color: #92400e;'>• {pattern}</div>")
+        html_parts.append("</div>")
+
+    html_parts.append("</div>")
+
+    return "".join(html_parts)
+
+def generate_risk_timeline_html(history: List[Dict[str, Any]]) -> str:
+    """生成风险评估时间线HTML"""
+    if not history:
+        return """
+        <div class='feature-card glass-effect'>
+            <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>
+                <span style='font-size: 1.3rem;'>📈</span>
+                <div style='font-size: 1.1rem; font-weight: 600;'>风险评估时间线</div>
+            </div>
+            <div style='background: #f8fafc; border-radius: 8px; padding: 1rem; text-align: center; color: #6b7280; font-size: 0.9rem;'>
+                暂无历史数据，开始检测后将显示风险评估时间线
+            </div>
+        </div>
+        """
+
+    timeline_html = """
+        <div class='feature-card glass-effect'>
+            <div style='display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem;'>
+                <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                    <span style='font-size: 1.3rem;'>📈</span>
+                    <div style='font-size: 1.1rem; font-weight: 600;'>风险评估时间线</div>
+                </div>
+                <div style='display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 12px;'>
+                    <span style='font-size: 0.9rem; color: #1e40af;'>最近 {len(history)} 次检测</span>
+                </div>
+            </div>
+
+            <div style='position: relative; padding: 1rem 0;'>
+                <!-- 时间线轴线 -->
+                <div style='position: absolute; left: 20px; top: 0; bottom: 0; width: 2px; background: linear-gradient(180deg, #3b82f6, #8b5cf6, #ec4899); border-radius: 1px;'></div>
+
+                <div style='display: flex; flex-direction: column; gap: 1rem; padding-left: 50px;'>
+    """
+
+    # 只显示最近10条记录
+    recent_history = history[:10]
+
+    for i, item in enumerate(recent_history):
+        # 解析风险概率
+        prob_str = item.get('probability', '0%')
+        prob_value = float(prob_str.rstrip('%')) if '%' in prob_str else 0
+
+        # 确定风险等级和颜色
+        if prob_value >= 70:
+            risk_color = '#ef4444'
+            risk_emoji = '🚨'
+            risk_bg = 'rgba(239, 68, 68, 0.1)'
+        elif prob_value >= 40:
+            risk_color = '#f59e0b'
+            risk_emoji = '⚠️'
+            risk_bg = 'rgba(245, 158, 11, 0.1)'
+        else:
+            risk_color = '#22c55e'
+            risk_emoji = '✅'
+            risk_bg = 'rgba(34, 197, 94, 0.1)'
+
+        # 时间点样式
+        dot_style = f'background: {risk_color}; border: 3px solid white; box-shadow: 0 0 0 3px {risk_bg};'
+
+        timeline_html += f"""
+            <div class='hover-lift' style='position: relative; display: flex; align-items: flex-start; gap: 1rem; padding: 1rem; background: {risk_bg}; border-radius: 12px; border-left: 4px solid {risk_color};'>
+                <!-- 时间点 -->
+                <div style='position: absolute; left: -40px; top: 1.5rem; width: 16px; height: 16px; border-radius: 50%; {dot_style};'></div>
+
+                <!-- 内容 -->
+                <div style='flex: 1;'>
+                    <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;'>
+                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                            <span style='font-size: 1.2rem;'>{risk_emoji}</span>
+                            <div style='font-size: 0.9rem; font-weight: 600; color: {risk_color};'>
+                                {item.get('label_text', '未知')}
+                            </div>
+                        </div>
+                        <div style='font-size: 0.8rem; color: #6b7280; font-weight: 500;'>
+                            {item.get('time', '')}
+                        </div>
+                    </div>
+
+                    <div style='margin-bottom: 0.5rem;'>
+                        <div style='font-size: 0.85rem; color: #374151; word-break: break-all; font-weight: 500;'>
+                            {item.get('url', '')[:60]}{'...' if len(item.get('url', '')) > 60 else ''}
+                        </div>
+                    </div>
+
+                    <div style='display: flex; align-items: center; gap: 1rem;'>
+                        <div style='display: flex; align-items: center; gap: 0.25rem;'>
+                            <div style='font-size: 0.8rem; color: #6b7280;'>风险概率:</div>
+                            <div style='font-size: 0.9rem; font-weight: 600; color: {risk_color};'>
+                                {prob_str}
+                            </div>
+                        </div>
+                        <div style='background: {risk_color}; height: 4px; border-radius: 2px; width: {prob_value}px; max-width: 100px;'></div>
+                    </div>
+                </div>
+            </div>
+        """
+
+    timeline_html += """
+                </div>
+            </div>
+
+            {f"""<div style='text-align: center; margin-top: 1rem; padding: 0.75rem; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border-left: 4px solid #3b82f6;'>
+                <div style='font-size: 0.85rem; color: #1e40af; font-weight: 500;'>
+                    💡 提示：点击历史记录可以重新分析对应URL
+                </div>
+            </div>""" if len(history) > 0 else ""}
+        </div>
+    """
+
+    return timeline_html
+
+def filter_history_data(history: List[Dict[str, Any]], search_term: str, show_safe: bool, show_risky: bool, show_danger: bool) -> List[Dict[str, Any]]:
+    """过滤历史数据"""
+    if not history:
+        return []
+
+    filtered = []
+    search_lower = search_term.lower() if search_term else ""
+
+    for item in history:
+        # 搜索过滤
+        if search_term:
+            url = item.get('url', '').lower()
+            time_str = item.get('time', '').lower()
+            if search_lower not in url and search_lower not in time_str:
+                continue
+
+        # 风险等级过滤
+        prob_str = item.get('probability', '0%')
+        prob_value = float(prob_str.rstrip('%')) if '%' in prob_str else 0
+
+        if prob_value < 40 and not show_safe:
+            continue
+        elif 40 <= prob_value < 70 and not show_risky:
+            continue
+        elif prob_value >= 70 and not show_danger:
+            continue
+
+        filtered.append(item)
+
+    return filtered
 
 def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
     str,
@@ -573,6 +926,7 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
 ]:
     history = list(history or [])
     history_rows = build_history_rows(history)
+    risk_timeline_html = generate_risk_timeline_html(history)
 
     if isinstance(result, Exception):
         conclusion = gr.HTML(
@@ -723,45 +1077,207 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
         status_code_val,
         content_type_val,
         gr.update(value=history_rows),
+        gr.update(value=risk_timeline_html),
         history,
     )
 
 
 def build_interface():
     custom_css = """
-    /* 全局样式 */
+    /* 全局样式 - 现代化升级 */
     .main-container {
-        max-width: 1400px;
+        max-width: 1600px;
         margin: auto;
-        padding: 20px;
+        padding: 24px;
+        background: radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.05) 0%, transparent 50%);
     }
 
     .gradio-container {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'SF Pro Display', sans-serif;
+        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #cbd5e1 100%);
         min-height: 100vh;
+        position: relative;
+        overflow-x: hidden;
     }
 
-    /* 风险等级样式 */
+    .gradio-container::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background:
+            radial-gradient(circle at 80% 20%, rgba(120, 119, 198, 0.03) 0%, transparent 50%),
+            radial-gradient(circle at 20% 80%, rgba(236, 72, 153, 0.03) 0%, transparent 50%);
+        pointer-events: none;
+        z-index: 0;
+    }
+
+    /* 深色模式样式 */
+    .dark-mode {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%) !important;
+        color: #f1f5f9 !important;
+    }
+
+    .dark-mode .feature-card {
+        background: #1e293b !important;
+        border: 1px solid #334155 !important;
+        color: #f1f5f9 !important;
+    }
+
+    .dark-mode .result-section {
+        background: #1e293b !important;
+        border: 1px solid #334155 !important;
+        color: #f1f5f9 !important;
+    }
+
+    /* 高级动画效果 */
+    .gradient-bg {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #fecfef 75%, #fecfef 100%);
+        color: white;
+        padding: 3rem;
+        border-radius: 2rem;
+        margin-bottom: 2rem;
+        box-shadow:
+            0 25px 50px rgba(0,0,0,0.15),
+            0 0 100px rgba(120, 119, 198, 0.1),
+            inset 0 0 50px rgba(255,255,255,0.05);
+        position: relative;
+        overflow: hidden;
+        transform: perspective(1000px) rotateX(0deg);
+        transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .gradient-bg:hover {
+        transform: perspective(1000px) rotateX(2deg) translateY(-5px);
+        box-shadow:
+            0 35px 70px rgba(0,0,0,0.2),
+            0 0 120px rgba(120, 119, 198, 0.15),
+            inset 0 0 80px rgba(255,255,255,0.08);
+    }
+
+    .gradient-bg::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: linear-gradient(
+            45deg,
+            transparent,
+            rgba(255,255,255,0.1),
+            transparent,
+            rgba(255,255,255,0.05),
+            transparent
+        );
+        transform: rotate(45deg) translateX(-100%);
+        animation: shimmer 4s ease-in-out infinite;
+    }
+
+    .gradient-bg::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: radial-gradient(
+            circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+            rgba(255,255,255,0.1) 0%,
+            transparent 50%
+        );
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+
+    .gradient-bg:hover::after {
+        opacity: 1;
+    }
+
+    @keyframes shimmer {
+        0% { transform: rotate(45deg) translateX(-100%); }
+        50% { transform: rotate(45deg) translateX(100%); }
+        100% { transform: rotate(45deg) translateX(-100%); }
+    }
+
+    /* 增强的风险等级样式 */
     .risk-safe {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
-        border: 1px solid #047857 !important;
+        background: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%) !important;
+        border: 2px solid #047857 !important;
         color: white !important;
-        animation: pulse-safe 2s infinite;
+        animation: pulse-safe 3s infinite, glow-safe 2s ease-in-out infinite alternate;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .risk-safe::before {
+        content: '';
+        position: absolute;
+        top: -2px;
+        left: -2px;
+        right: -2px;
+        bottom: -2px;
+        background: linear-gradient(45deg, #10b981, #059669, #047857, #10b981);
+        border-radius: inherit;
+        z-index: -1;
+        opacity: 0;
+        animation: border-rotate 3s linear infinite;
+    }
+
+    .risk-safe:hover::before {
+        opacity: 1;
     }
 
     .risk-warning {
-        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
-        border: 1px solid #b45309 !important;
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%) !important;
+        border: 2px solid #b45309 !important;
         color: white !important;
-        animation: pulse-warning 2s infinite;
+        animation: pulse-warning 3s infinite, glow-warning 2s ease-in-out infinite alternate;
     }
 
     .risk-danger {
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
-        border: 1px solid #b91c1c !important;
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%) !important;
+        border: 2px solid #b91c1c !important;
         color: white !important;
-        animation: pulse-danger 2s infinite;
+        animation: pulse-danger 2s infinite, glow-danger 1.5s ease-in-out infinite alternate;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .risk-danger::after {
+        content: '⚠️';
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        font-size: 1.5rem;
+        animation: blink 1s infinite;
+    }
+
+    @keyframes glow-safe {
+        from { box-shadow: 0 0 20px rgba(16, 185, 129, 0.3); }
+        to { box-shadow: 0 0 30px rgba(16, 185, 129, 0.6); }
+    }
+
+    @keyframes glow-warning {
+        from { box-shadow: 0 0 20px rgba(245, 158, 11, 0.3); }
+        to { box-shadow: 0 0 30px rgba(245, 158, 11, 0.6); }
+    }
+
+    @keyframes glow-danger {
+        from { box-shadow: 0 0 25px rgba(239, 68, 68, 0.4); }
+        to { box-shadow: 0 0 40px rgba(239, 68, 68, 0.8); }
+    }
+
+    @keyframes border-rotate {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    @keyframes blink {
+        0%, 50%, 100% { opacity: 1; }
+        25%, 75% { opacity: 0.3; }
     }
 
     @keyframes pulse-safe {
@@ -808,16 +1324,21 @@ def build_interface():
         100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
     }
 
-    /* 卡片样式 */
+    /* 增强的卡片样式 */
     .feature-card {
-        background: white;
-        border-radius: 16px;
-        padding: 2rem;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.08);
-        border: 1px solid #e2e8f0;
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        background: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(20px);
+        border-radius: 20px;
+        padding: 2.5rem;
+        box-shadow:
+            0 20px 40px rgba(0,0,0,0.08),
+            0 0 80px rgba(120, 119, 198, 0.05),
+            inset 0 1px 0 rgba(255,255,255,0.5);
+        border: 1px solid rgba(255,255,255,0.2);
+        transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
         overflow: hidden;
+        transform-style: preserve-3d;
     }
 
     .feature-card::before {
@@ -826,31 +1347,83 @@ def build_interface():
         top: 0;
         left: 0;
         right: 0;
-        height: 4px;
-        background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899);
+        height: 5px;
+        background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899, #3b82f6);
+        background-size: 300% 100%;
         transform: scaleX(0);
-        transition: transform 0.3s ease;
+        transform-origin: left;
+        transition: transform 0.5s ease;
+        border-radius: 5px 5px 0 0;
     }
 
     .feature-card:hover::before {
         transform: scaleX(1);
+        animation: gradient-flow 3s ease-in-out infinite;
+    }
+
+    .feature-card::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: radial-gradient(
+            circle at var(--card-mouse-x, 50%) var(--card-mouse-y, 50%),
+            rgba(120, 119, 198, 0.05) 0%,
+            transparent 50%
+        );
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        pointer-events: none;
+    }
+
+    .feature-card:hover::after {
+        opacity: 1;
+    }
+
+    @keyframes gradient-flow {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
     }
 
     .feature-card:hover {
-        transform: translateY(-8px) scale(1.02);
-        box-shadow: 0 20px 40px rgba(0,0,0,0.12);
+        transform: translateY(-12px) rotateX(2deg) scale(1.02);
+        box-shadow:
+            0 40px 80px rgba(0,0,0,0.12),
+            0 0 120px rgba(120, 119, 198, 0.08),
+            0 20px 40px rgba(0,0,0,0.1);
     }
 
-    /* 状态指示器 */
+    /* 增强的状态指示器 */
     .status-indicator {
-        border-radius: 20px;
-        padding: 2rem;
+        border-radius: 24px;
+        padding: 2.5rem;
         text-align: center;
         font-weight: 700;
-        transition: all 0.4s ease;
+        transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
         border: 3px solid transparent;
         position: relative;
         overflow: hidden;
+        backdrop-filter: blur(10px);
+        transform-style: preserve-3d;
+    }
+
+    .status-indicator::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
+        transform: translateX(-100%);
+        transition: transform 0.8s ease;
+    }
+
+    .status-indicator:hover::before {
+        transform: translateX(100%);
     }
 
     .status-indicator::after {
@@ -860,34 +1433,55 @@ def build_interface():
         left: 50%;
         width: 0;
         height: 0;
-        background: rgba(255,255,255,0.2);
+        background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
         border-radius: 50%;
         transform: translate(-50%, -50%);
-        transition: all 0.6s ease;
+        transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .status-indicator:hover::after {
-        width: 100%;
-        height: 100%;
+        width: 150%;
+        height: 150%;
     }
 
-    /* 进度条样式 */
+    .status-indicator:hover {
+        transform: translateY(-8px) scale(1.05);
+        box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+    }
+
+    /* 增强的进度条样式 */
     .progress-bar {
         width: 100%;
-        height: 8px;
-        background: #e2e8f0;
-        border-radius: 10px;
+        height: 12px;
+        background: linear-gradient(90deg, #e2e8f0, #cbd5e1, #e2e8f0);
+        border-radius: 15px;
         overflow: hidden;
-        margin: 1rem 0;
+        margin: 1.5rem 0;
+        position: relative;
+        box-shadow: inset 0 2px 4px rgba(0,0,0,0.06);
+    }
+
+    .progress-bar::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        animation: progress-shimmer-bg 3s infinite;
     }
 
     .progress-fill {
         height: 100%;
-        background: linear-gradient(90deg, #3b82f6, #8b5cf6);
-        border-radius: 10px;
-        transition: width 0.6s ease;
+        background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899);
+        border-radius: 15px;
+        transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
         overflow: hidden;
+        box-shadow:
+            0 0 20px rgba(59, 130, 246, 0.3),
+            inset 0 1px 0 rgba(255,255,255,0.3);
     }
 
     .progress-fill::after {
@@ -897,8 +1491,38 @@ def build_interface():
         left: 0;
         bottom: 0;
         right: 0;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+        background: linear-gradient(
+            90deg,
+            transparent,
+            rgba(255,255,255,0.4),
+            rgba(255,255,255,0.6),
+            rgba(255,255,255,0.4),
+            transparent
+        );
         animation: progress-shimmer 2s infinite;
+        border-radius: 15px;
+    }
+
+    .progress-fill::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        animation: progress-wave 3s infinite;
+    }
+
+    @keyframes progress-shimmer-bg {
+        0% { opacity: 0.3; }
+        50% { opacity: 0.7; }
+        100% { opacity: 0.3; }
+    }
+
+    @keyframes progress-wave {
+        0% { left: -100%; }
+        100% { left: 100%; }
     }
 
     @keyframes progress-shimmer {
@@ -936,17 +1560,21 @@ def build_interface():
         box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     }
 
-    /* 按钮样式 */
+    /* 增强的按钮样式 */
     .btn-primary {
-        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 25%, #1d4ed8 50%, #1e40af 75%, #1e3a8a 100%) !important;
         border: none !important;
         color: white !important;
         font-weight: 600 !important;
-        padding: 12px 24px !important;
-        border-radius: 12px !important;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        padding: 16px 32px !important;
+        border-radius: 16px !important;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
         position: relative !important;
         overflow: hidden !important;
+        text-transform: none !important;
+        letter-spacing: 0.5px !important;
+        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2) !important;
+        transform-style: preserve-3d !important;
     }
 
     .btn-primary::before {
@@ -956,8 +1584,29 @@ def build_interface():
         left: -100%;
         width: 100%;
         height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-        transition: left 0.5s ease;
+        background: linear-gradient(
+            90deg,
+            transparent,
+            rgba(255,255,255,0.3),
+            rgba(255,255,255,0.5),
+            rgba(255,255,255,0.3),
+            transparent
+        );
+        transition: left 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 16px;
+    }
+
+    .btn-primary::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        transition: all 0.8s ease;
     }
 
     .btn-primary:hover::before {
@@ -965,40 +1614,159 @@ def build_interface():
     }
 
     .btn-primary:hover {
-        transform: translateY(-2px) scale(1.05) !important;
-        box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4) !important;
+        transform: translateY(-4px) scale(1.08) rotateX(2deg) !important;
+        box-shadow:
+            0 12px 30px rgba(59, 130, 246, 0.5),
+            0 0 50px rgba(59, 130, 246, 0.2),
+            inset 0 1px 0 rgba(255,255,255,0.3) !important;
     }
 
     .btn-primary:active {
-        transform: translateY(0) scale(0.98) !important;
+        transform: translateY(-2px) scale(1.02) !important;
+        transition: all 0.1s ease !important;
     }
 
-    /* 输入框样式 */
-    .gradio-textbox {
+    .btn-primary:active::after {
+        width: 200%;
+        height: 200%;
+        opacity: 0;
+    }
+
+    /* 次要按钮样式 */
+    .btn-secondary {
+        background: linear-gradient(135deg, #6b7280 0%, #4b5563 50%, #374151 100%) !important;
+        border: none !important;
+        color: white !important;
+        font-weight: 500 !important;
+        padding: 12px 24px !important;
         border-radius: 12px !important;
-        border: 2px solid #e2e8f0 !important;
-        transition: all 0.3s ease !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        position: relative !important;
+        overflow: hidden !important;
+        box-shadow: 0 4px 12px rgba(107, 114, 128, 0.2) !important;
+    }
+
+    .btn-secondary:hover {
+        transform: translateY(-2px) scale(1.05) !important;
+        box-shadow: 0 8px 20px rgba(107, 114, 128, 0.3) !important;
+    }
+
+    /* 增强的输入框样式 */
+    .gradio-textbox {
+        border-radius: 16px !important;
+        border: 2px solid rgba(226, 232, 240, 0.8) !important;
+        background: rgba(255, 255, 255, 0.9) !important;
+        backdrop-filter: blur(10px) !important;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
+        font-size: 1rem !important;
+        padding: 16px !important;
     }
 
     .gradio-textbox:focus {
         border-color: #3b82f6 !important;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+        box-shadow:
+            0 0 0 4px rgba(59, 130, 246, 0.1),
+            0 8px 25px rgba(59, 130, 246, 0.15),
+            inset 0 1px 0 rgba(255,255,255,0.3) !important;
+        transform: translateY(-2px) !important;
+        background: rgba(255, 255, 255, 0.95) !important;
     }
 
-    /* 加载动画 */
+    .gradio-textarea {
+        border-radius: 16px !important;
+        border: 2px solid rgba(226, 232, 240, 0.8) !important;
+        background: rgba(255, 255, 255, 0.9) !important;
+        backdrop-filter: blur(10px) !important;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
+        font-size: 1rem !important;
+        padding: 16px !important;
+        resize: vertical !important;
+    }
+
+    .gradio-textarea:focus {
+        border-color: #3b82f6 !important;
+        box-shadow:
+            0 0 0 4px rgba(59, 130, 246, 0.1),
+            0 8px 25px rgba(59, 130, 246, 0.15) !important;
+        transform: translateY(-2px) !important;
+        background: rgba(255, 255, 255, 0.95) !important;
+    }
+
+    /* 增强的加载动画 */
     .loading-spinner {
-        width: 40px;
-        height: 40px;
-        border: 4px solid #e2e8f0;
+        width: 60px;
+        height: 60px;
+        position: relative;
+        margin: 30px auto;
+    }
+
+    .loading-spinner::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border: 4px solid transparent;
         border-top: 4px solid #3b82f6;
         border-radius: 50%;
         animation: spin 1s linear infinite;
-        margin: 20px auto;
     }
+
+    .loading-spinner::after {
+        content: '';
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        width: calc(100% - 16px);
+        height: calc(100% - 16px);
+        border: 3px solid transparent;
+        border-top: 3px solid #8b5cf6;
+        border-radius: 50%;
+        animation: spin-reverse 0.8s linear infinite;
+    }
+
+    .loading-dots {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        margin: 20px 0;
+    }
+
+    .loading-dots span {
+        width: 12px;
+        height: 12px;
+        background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+        border-radius: 50%;
+        animation: bounce 1.4s infinite ease-in-out both;
+        box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+    }
+
+    .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+    .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+    .loading-dots span:nth-child(3) { animation-delay: 0; }
 
     @keyframes spin {
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
+    }
+
+    @keyframes spin-reverse {
+        0% { transform: rotate(360deg); }
+        100% { transform: rotate(0deg); }
+    }
+
+    @keyframes bounce {
+        0%, 80%, 100% {
+            transform: scale(0.8) translateY(0);
+            opacity: 0.5;
+        }
+        40% {
+            transform: scale(1.2) translateY(-20px);
+            opacity: 1;
+        }
     }
 
     /* 工具提示样式 */
@@ -1030,24 +1798,366 @@ def build_interface():
         visibility: visible;
     }
 
-    /* 响应式设计 */
+    /* 增强的响应式设计 */
     @media (max-width: 768px) {
         .main-container {
-            padding: 10px;
+            padding: 12px;
         }
 
         .gradient-bg {
-            padding: 1.5rem;
-            margin-bottom: 1rem;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            border-radius: 1.5rem;
         }
 
         .feature-card {
             padding: 1.5rem;
+            border-radius: 16px;
         }
 
         .status-indicator {
             padding: 1.5rem;
+            border-radius: 16px;
         }
+
+        .btn-primary {
+            padding: 14px 24px !important;
+            font-size: 0.9rem !important;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .gradient-bg {
+            padding: 1.5rem;
+        }
+
+        .feature-card {
+            padding: 1rem;
+        }
+
+        .status-indicator {
+            padding: 1rem;
+        }
+
+        .btn-primary {
+            padding: 12px 20px !important;
+            font-size: 0.85rem !important;
+        }
+    }
+
+    /* 新增交互效果 */
+    .hover-lift {
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .hover-lift:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 24px rgba(0,0,0,0.1);
+    }
+
+    .glass-effect {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .neon-glow {
+        animation: neon-pulse 2s ease-in-out infinite alternate;
+    }
+
+    @keyframes neon-pulse {
+        from {
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.5),
+                       0 0 20px rgba(59, 130, 246, 0.3),
+                       0 0 30px rgba(59, 130, 246, 0.1);
+        }
+        to {
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.8),
+                       0 0 25px rgba(59, 130, 246, 0.5),
+                       0 0 35px rgba(59, 130, 246, 0.3);
+        }
+    }
+
+    /* 新增微交互 */
+    .micro-interact {
+        position: relative;
+        overflow: hidden;
+    }
+
+    .micro-interact::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        transition: all 0.6s ease;
+        pointer-events: none;
+    }
+
+    .micro-interact:active::before {
+        width: 300%;
+        height: 300%;
+        opacity: 0;
+    }
+
+    /* 滚动条美化 */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: rgba(226, 232, 240, 0.3);
+        border-radius: 10px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, #94a3b8, #64748b);
+        border-radius: 10px;
+        transition: all 0.3s ease;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(135deg, #64748b, #475569);
+    }
+
+    /* 选择文本样式 */
+    ::selection {
+        background: rgba(59, 130, 246, 0.2);
+        color: #1e293b;
+    }
+
+    ::-moz-selection {
+        background: rgba(59, 130, 246, 0.2);
+        color: #1e293b;
+    }
+
+    /* 新增高级动画效果 */
+    @keyframes ripple {
+        to {
+            width: 200px;
+            height: 200px;
+            opacity: 0;
+        }
+    }
+
+    @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+    }
+
+    @keyframes pulse-glow {
+        0%, 100% {
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+        }
+        50% {
+            box-shadow: 0 0 40px rgba(59, 130, 246, 0.8);
+        }
+    }
+
+    .floating-element {
+        animation: float 3s ease-in-out infinite;
+    }
+
+    .pulse-glow {
+        animation: pulse-glow 2s ease-in-out infinite;
+    }
+
+    /* 新增渐变文字效果 */
+    .gradient-text {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        font-weight: 700;
+    }
+
+    /* 新增玻璃态效果 */
+    .glass-morphism {
+        background: rgba(255, 255, 255, 0.25);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+    }
+
+    /* 新增微交互动画 */
+    .micro-bounce {
+        transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    }
+
+    .micro-bounce:hover {
+        transform: scale(1.05);
+    }
+
+    .micro-bounce:active {
+        transform: scale(0.95);
+    }
+
+    /* 新增数据可视化样式 */
+    .chart-container {
+        position: relative;
+        height: 300px;
+        background: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(20px);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    /* 新增加载骨架屏 */
+    .skeleton {
+        background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+        background-size: 200% 100%;
+        animation: loading 1.5s infinite;
+    }
+
+    @keyframes loading {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+
+    /* 新增标签样式 */
+    .tag {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        transition: all 0.2s ease;
+    }
+
+    .tag-primary {
+        background: rgba(59, 130, 246, 0.1);
+        color: #1e40af;
+        border: 1px solid rgba(59, 130, 246, 0.2);
+    }
+
+    .tag-success {
+        background: rgba(34, 197, 94, 0.1);
+        color: #14532d;
+        border: 1px solid rgba(34, 197, 94, 0.2);
+    }
+
+    .tag-warning {
+        background: rgba(245, 158, 11, 0.1);
+        color: #78350f;
+        border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+
+    .tag-danger {
+        background: rgba(239, 68, 68, 0.1);
+        color: #7f1d1d;
+        border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    /* 新增工具提示 */
+    .tooltip-custom {
+        position: relative;
+        cursor: help;
+    }
+
+    .tooltip-custom::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 125%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1f2937;
+        color: white;
+        padding: 0.5rem 0.75rem;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        white-space: nowrap;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s ease;
+        z-index: 1000;
+        pointer-events: none;
+    }
+
+    .tooltip-custom:hover::after {
+        opacity: 1;
+        visibility: visible;
+        transform: translateX(-50%) translateY(-5px);
+    }
+
+    /* 新增通知样式 */
+    .notification {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 1rem 1.5rem;
+        border-radius: 12px;
+        background: white;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        border-left: 4px solid #3b82f6;
+        z-index: 1000;
+        transform: translateX(400px);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .notification.show {
+        transform: translateX(0);
+    }
+
+    .notification.success {
+        border-left-color: #22c55e;
+    }
+
+    .notification.warning {
+        border-left-color: #f59e0b;
+    }
+
+    .notification.error {
+        border-left-color: #ef4444;
+    }
+
+    /* 新增模态框样式 */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(5px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s ease;
+    }
+
+    .modal-overlay.show {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    .modal-content {
+        background: white;
+        border-radius: 20px;
+        padding: 2rem;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+        transform: scale(0.9);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .modal-overlay.show .modal-content {
+        transform: scale(1);
     }
     """
 
@@ -1108,26 +2218,40 @@ def build_interface():
                     with gr.Column(scale=1):
                         with gr.Group():
                             url_info_display = gr.HTML(
-                                "<div class='feature-card' style='text-align: center; padding: 1rem;'>"
-                                "<div style='font-size: 0.9rem; color: #6b7280; margin-bottom: 0.5rem;'>🔗 URL信息</div>"
-                                "<div style='font-size: 0.85rem; color: #9ca3af;'>输入URL后显示分析</div>"
+                                "<div class='feature-card glass-effect' style='text-align: center; padding: 1.5rem;'>"
+                                "<div style='font-size: 2rem; margin-bottom: 0.5rem;'>🔗</div>"
+                                "<div style='font-size: 1rem; color: #6b7280; margin-bottom: 0.5rem;'>URL智能分析</div>"
+                                "<div style='font-size: 0.85rem; color: #9ca3af;'>输入网址后自动分析</div>"
                                 "</div>"
+                            )
+                            url_suggestions = gr.HTML(
+                                visible=False,
+                                value=""
                             )
                             screenshot_cb = gr.Checkbox(
                                 label="📸 启用截图功能",
                                 value=False,
                                 info="生成页面截图"
                             )
-                            quick_validate_btn = gr.Button(
-                                "⚡ 快速验证",
-                                variant="secondary",
-                                size="sm"
-                            )
+                            with gr.Row():
+                                quick_validate_btn = gr.Button(
+                                    "⚡ 智能分析",
+                                    variant="secondary",
+                                    size="sm",
+                                    elem_classes="micro-interact"
+                                )
+                                dark_mode_btn = gr.Button(
+                                    "🌙 深色模式",
+                                    variant="secondary",
+                                    size="sm",
+                                    elem_classes="micro-interact"
+                                )
                             scan_btn = gr.Button(
                                 "🔍 开始检测",
                                 variant="primary",
                                 size="lg",
-                                scale=1
+                                scale=1,
+                                elem_classes="micro-interact"
                             )
 
                 with gr.Row():
@@ -1252,64 +2376,168 @@ def build_interface():
                                 show_download_button=True
                             )
 
-                with gr.Accordion("📊 统计信息", open=True):
+                with gr.Accordion("📊 实时统计面板", open=True):
                     with gr.Row():
-                        with gr.Column():
+                        with gr.Column(scale=2):
                             stats_display = gr.HTML(
                                 """
-                                <div class="feature-card">
-                                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-                                        <span style="font-size: 1.5rem;">📈</span>
-                                        <div style="font-size: 1.2rem; font-weight: 600;">检测统计</div>
+                                <div class="feature-card glass-effect">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem;">
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <span style="font-size: 1.8rem;">📈</span>
+                                            <div style="font-size: 1.3rem; font-weight: 600;">实时统计</div>
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 12px;">
+                                            <span style="font-size: 1rem; color: #3b82f6; font-weight: 500;">📊</span>
+                                            <span style="font-size: 0.9rem; color: #1e40af;">实时更新</span>
+                                        </div>
                                     </div>
-                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
-                                        <div style="text-align: center; padding: 1rem; background: #f8fafc; border-radius: 8px;">
-                                            <div style="font-size: 1.5rem; font-weight: 700; color: #3b82f6;">0</div>
-                                            <div style="font-size: 0.9rem; color: #6b7280;">总检测数</div>
+                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem;">
+                                        <div class="hover-lift" style="text-align: center; padding: 1.2rem; background: linear-gradient(135deg, #f0f9ff, #e0f2fe); border-radius: 12px; border: 1px solid #bae6fd;">
+                                            <div style="font-size: 2rem; font-weight: 800; color: #0284c7; margin-bottom: 0.5rem;" id="total-count">0</div>
+                                            <div style="font-size: 0.9rem; color: #0c4a6e; font-weight: 500;">总检测数</div>
+                                            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">实时累计</div>
                                         </div>
-                                        <div style="text-align: center; padding: 1rem; background: #f0fdf4; border-radius: 8px;">
-                                            <div style="font-size: 1.5rem; font-weight: 700; color: #22c55e;">0</div>
-                                            <div style="font-size: 0.9rem; color: #6b7280;">安全网站</div>
+                                        <div class="hover-lift" style="text-align: center; padding: 1.2rem; background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-radius: 12px; border: 1px solid #bbf7d0;">
+                                            <div style="font-size: 2rem; font-weight: 800; color: #16a34a; margin-bottom: 0.5rem;" id="safe-count">0</div>
+                                            <div style="font-size: 0.9rem; color: #14532d; font-weight: 500;">安全网站</div>
+                                            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">可信域名</div>
                                         </div>
-                                        <div style="text-align: center; padding: 1rem; background: #fef2f2; border-radius: 8px;">
-                                            <div style="font-size: 1.5rem; font-weight: 700; color: #ef4444;">0</div>
-                                            <div style="font-size: 0.9rem; color: #6b7280;">危险网站</div>
+                                        <div class="hover-lift" style="text-align: center; padding: 1.2rem; background: linear-gradient(135deg, #fef2f2, #fee2e2); border-radius: 12px; border: 1px solid #fecaca;">
+                                            <div style="font-size: 2rem; font-weight: 800; color: #dc2626; margin-bottom: 0.5rem;" id="danger-count">0</div>
+                                            <div style="font-size: 0.9rem; color: #991b1b; font-weight: 500;">危险网站</div>
+                                            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">钓鱼威胁</div>
                                         </div>
-                                        <div style="text-align: center; padding: 1rem; background: #fefce8; border-radius: 8px;">
-                                            <div style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;">0%</div>
-                                            <div style="font-size: 0.9rem; color: #6b7280;">检测准确率</div>
+                                        <div class="hover-lift" style="text-align: center; padding: 1.2rem; background: linear-gradient(135deg, #fefce8, #fef3c7); border-radius: 12px; border: 1px solid #fef3c7;">
+                                            <div style="font-size: 2rem; font-weight: 800; color: #d97706; margin-bottom: 0.5rem;" id="accuracy-rate">0%</div>
+                                            <div style="font-size: 0.9rem; color: #92400e; font-weight: 500;">检测准确率</div>
+                                            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">模型精度</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                """
+                            )
+                        with gr.Column(scale=1):
+                            # 添加风险等级分布图表
+                            risk_distribution = gr.HTML(
+                                """
+                                <div class="feature-card glass-effect">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+                                        <span style="font-size: 1.3rem;">🎯</span>
+                                        <div style="font-size: 1.1rem; font-weight: 600;">风险分布</div>
+                                    </div>
+                                    <div style="background: #f8fafc; border-radius: 8px; padding: 1rem;">
+                                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                                <div style="width: 12px; height: 12px; background: #22c55e; border-radius: 50%;"></div>
+                                                <div style="font-size: 0.85rem; color: #374151; flex: 1;">低风险</div>
+                                                <div style="font-size: 0.85rem; font-weight: 600; color: #16a34a;" id="low-risk">0</div>
+                                            </div>
+                                            <div style="background: #e5e7eb; height: 6px; border-radius: 3px; overflow: hidden;">
+                                                <div id="low-risk-bar" style="width: 0%; height: 100%; background: #22c55e; transition: width 0.5s ease;"></div>
+                                            </div>
+                                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                                <div style="width: 12px; height: 12px; background: #f59e0b; border-radius: 50%;"></div>
+                                                <div style="font-size: 0.85rem; color: #374151; flex: 1;">中风险</div>
+                                                <div style="font-size: 0.85rem; font-weight: 600; color: #d97706;" id="medium-risk">0</div>
+                                            </div>
+                                            <div style="background: #e5e7eb; height: 6px; border-radius: 3px; overflow: hidden;">
+                                                <div id="medium-risk-bar" style="width: 0%; height: 100%; background: #f59e0b; transition: width 0.5s ease;"></div>
+                                            </div>
+                                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                                <div style="width: 12px; height: 12px; background: #ef4444; border-radius: 50%;"></div>
+                                                <div style="font-size: 0.85rem; color: #374151; flex: 1;">高风险</div>
+                                                <div style="font-size: 0.85rem; font-weight: 600; color: #dc2626;" id="high-risk">0</div>
+                                            </div>
+                                            <div style="background: #e5e7eb; height: 6px; border-radius: 3px; overflow: hidden;">
+                                                <div id="high-risk-bar" style="width: 0%; height: 100%; background: #ef4444; transition: width 0.5s ease;"></div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                                 """
                             )
 
-                with gr.Accordion("🗂 历史记录", open=False):
+                with gr.Accordion("🗂 智能历史记录", open=False):
                     with gr.Row():
-                        with gr.Column(scale=4):
+                        with gr.Column(scale=1):
+                            # 搜索和过滤功能
+                            with gr.Group():
+                                gr.HTML(
+                                    """
+                                    <div class='feature-card glass-effect' style='padding: 1rem; margin-bottom: 1rem;'>
+                                        <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;'>
+                                            <span style='font-size: 1.1rem;'>🔍</span>
+                                            <div style='font-size: 1rem; font-weight: 600;'>搜索过滤</div>
+                                        </div>
+                                    </div>
+                                    """
+                                )
+                                history_search = gr.Textbox(
+                                    label="搜索历史记录",
+                                    placeholder="输入关键词搜索...",
+                                    show_label=False,
+                                    elem_classes="micro-interact"
+                                )
+                                with gr.Row():
+                                    filter_safe = gr.Checkbox(
+                                        label="✅ 安全",
+                                        value=True
+                                    )
+                                    filter_risky = gr.Checkbox(
+                                        label="⚠️ 风险",
+                                        value=True
+                                    )
+                                    filter_danger = gr.Checkbox(
+                                        label="🚨 危险",
+                                        value=True
+                                    )
+
+                                clear_history_btn = gr.Button(
+                                    "🧹 清空记录",
+                                    variant="secondary",
+                                    size="sm",
+                                    elem_classes="micro-interact"
+                                )
+                                export_history_btn = gr.Button(
+                                    "📥 导出历史",
+                                    variant="secondary",
+                                    size="sm",
+                                    elem_classes="micro-interact"
+                                )
+                                stats_refresh_btn = gr.Button(
+                                    "🔄 刷新统计",
+                                    variant="secondary",
+                                    size="sm",
+                                    elem_classes="micro-interact"
+                                )
+
+                        with gr.Column(scale=3):
+                            # 增强的历史表格
                             history_table = gr.DataFrame(
-                                headers=["时间", "URL", "综合概率", "结论"],
-                                datatype=["str", "str", "str", "str"],
+                                headers=["时间", "URL", "风险等级", "概率", "结论"],
+                                datatype=["str", "str", "str", "str", "str"],
                                 value=[],
                                 interactive=False,
                                 wrap=True,
+                                height=400
                             )
-                        with gr.Column(scale=1):
-                            clear_history_btn = gr.Button(
-                                "🧹 清空记录",
-                                variant="secondary",
-                                size="sm"
-                            )
-                            export_history_btn = gr.Button(
-                                "📥 导出历史",
-                                variant="secondary",
-                                size="sm"
-                            )
-                            stats_refresh_btn = gr.Button(
-                                "🔄 刷新统计",
-                                variant="secondary",
-                                size="sm"
-                            )
+
+                    # 风险评估时间线
+                    with gr.Row():
+                        risk_timeline = gr.HTML(
+                            """
+                            <div class='feature-card glass-effect'>
+                                <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>
+                                    <span style='font-size: 1.3rem;'>📈</span>
+                                    <div style='font-size: 1.1rem; font-weight: 600;'>风险评估时间线</div>
+                                </div>
+                                <div style='background: #f8fafc; border-radius: 8px; padding: 1rem; text-align: center; color: #6b7280; font-size: 0.9rem;'>
+                                    暂无历史数据，开始检测后将显示风险评估时间线
+                                </div>
+                            </div>
+                            """
+                        )
 
             with gr.TabItem("📋 批量检测"):
                 gr.HTML(
@@ -1505,8 +2733,22 @@ def build_interface():
                 gr.HTML(
                     """
                     <div class='gradient-bg' style='background: linear-gradient(135deg, #6366f1, #8b5cf6);'>
-                        <h3 style='margin: 0 0 1rem 0; font-size: 1.5rem;'>ℹ️ 系统信息</h3>
-                        <p style='margin: 0; opacity: 0.9;'>模型版本与系统配置详情</p>
+                        <h3 style='margin: 0 0 1rem 0; font-size: 1.5rem;'>ℹ️ 系统信息与控制中心</h3>
+                        <p style='margin: 0; opacity: 0.9;'>模型版本、系统配置与高级功能</p>
+                        <div style='margin-top: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;'>
+                            <div style='display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(255,255,255,0.2); border-radius: 20px; backdrop-filter: blur(10px);'>
+                                <span style='font-size: 1rem;'>🚀</span>
+                                <span style='font-size: 0.9rem;'>PWA就绪</span>
+                            </div>
+                            <div style='display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(255,255,255,0.2); border-radius: 20px; backdrop-filter: blur(10px);'>
+                                <span style='font-size: 1rem;'>🌙</span>
+                                <span style='font-size: 0.9rem;'>深色模式</span>
+                            </div>
+                            <div style='display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(255,255,255,0.2); border-radius: 20px; backdrop-filter: blur(10px);'>
+                                <span style='font-size: 1rem;'>⌨️</span>
+                                <span style='font-size: 0.9rem;'>快捷键</span>
+                            </div>
+                        </div>
                     </div>
                     """
                 )
@@ -1582,56 +2824,166 @@ def build_interface():
                     with gr.TabItem("📈 使用指南"):
                         gr.HTML(
                             """
-                            <div class='feature-card'>
+                            <div class='feature-card glass-effect'>
                                 <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;'>
                                     <span style='font-size: 1.5rem;'>📈</span>
-                                    <div style='font-size: 1.3rem; font-weight: 600;'>推荐使用流程</div>
+                                    <div style='font-size: 1.3rem; font-weight: 600;'>完整使用指南</div>
                                 </div>
 
-                                <div style='background: linear-gradient(135deg, #f8fafc, #f1f5f9); padding: 1.5rem; border-radius: 12px; margin: 1rem 0;'>
-                                    <div style='font-weight: 600; color: #475569; margin-bottom: 1rem; font-size: 1.1rem;'>🔍 单URL检测流程</div>
-                                    <div style='display: flex; flex-direction: column; gap: 0.5rem;'>
-                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
-                                            <div style='background: #3b82f6; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>1</div>
-                                            <div style='color: #475569;'>输入或选择URL进行检测</div>
+                                <div style='background: linear-gradient(135deg, #f0f9ff, #e0f2fe); padding: 1.5rem; border-radius: 16px; margin: 1rem 0; border: 1px solid #bae6fd;'>
+                                    <div style='font-weight: 600; color: #0c4a6e; margin-bottom: 1rem; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;'>
+                                        <span>🔍</span> 单URL检测流程
+                                    </div>
+                                    <div style='display: flex; flex-direction: column; gap: 0.75rem;'>
+                                        <div class='hover-lift' style='display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: rgba(255,255,255,0.8); border-radius: 8px;'>
+                                            <div style='background: #3b82f6; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; flex-shrink: 0;'>1</div>
+                                            <div style='color: #1e40af; font-weight: 500;'>输入URL，系统会自动进行智能分析和风险预判</div>
                                         </div>
-                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
-                                            <div style='background: #3b82f6; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>2</div>
-                                            <div style='color: #475569;'>查看概率拆解和推理细节</div>
+                                        <div class='hover-lift' style='display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: rgba(255,255,255,0.8); border-radius: 8px;'>
+                                            <div style='background: #3b82f6; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; flex-shrink: 0;'>2</div>
+                                            <div style='color: #1e40af; font-weight: 500;'>查看概率拆解、推理细节和特征分析</div>
                                         </div>
-                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
-                                            <div style='background: #3b82f6; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>3</div>
-                                            <div style='color: #475569;'>根据结果做出安全判断</div>
+                                        <div class='hover-lift' style='display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: rgba(255,255,255,0.8); border-radius: 8px;'>
+                                            <div style='background: #3b82f6; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; flex-shrink: 0;'>3</div>
+                                            <div style='color: #1e40af; font-weight: 500;'>根据综合评估结果做出安全判断</div>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div style='background: linear-gradient(135deg, #fef3c7, #fde68a); padding: 1.5rem; border-radius: 12px; margin: 1rem 0;'>
-                                    <div style='font-weight: 600; color: #92400e; margin-bottom: 1rem; font-size: 1.1rem;'>📋 批量检测流程</div>
-                                    <div style='display: flex; flex-direction: column; gap: 0.5rem;'>
-                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
-                                            <div style='background: #f59e0b; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>1</div>
-                                            <div style='color: #78350f;'>批量粘贴URL列表（每行一个）</div>
+                                <div style='background: linear-gradient(135deg, #fef3c7, #fde68a); padding: 1.5rem; border-radius: 16px; margin: 1rem 0; border: 1px solid #fcd34d;'>
+                                    <div style='font-weight: 600; color: #92400e; margin-bottom: 1rem; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;'>
+                                        <span>📋</span> 批量检测流程
+                                    </div>
+                                    <div style='display: flex; flex-direction: column; gap: 0.75rem;'>
+                                        <div class='hover-lift' style='display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: rgba(255,255,255,0.8); border-radius: 8px;'>
+                                            <div style='background: #f59e0b; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; flex-shrink: 0;'>1</div>
+                                            <div style='color: #78350f; font-weight: 500;'>批量粘贴URL列表（每行一个，最多50个）</div>
                                         </div>
-                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
-                                            <div style='background: #f59e0b; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>2</div>
-                                            <div style='color: #78350f;'>点击开始批量检测</div>
+                                        <div class='hover-lift' style='display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: rgba(255,255,255,0.8); border-radius: 8px;'>
+                                            <div style='background: #f59e0b; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; flex-shrink: 0;'>2</div>
+                                            <div style='color: #78350f; font-weight: 500;'>点击开始批量检测，系统会并发处理</div>
                                         </div>
-                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
-                                            <div style='background: #f59e0b; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>3</div>
-                                            <div style='color: #78350f;'>查看详细结果并导出CSV报告</div>
+                                        <div class='hover-lift' style='display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: rgba(255,255,255,0.8); border-radius: 8px;'>
+                                            <div style='background: #f59e0b; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; flex-shrink: 0;'>3</div>
+                                            <div style='color: #78350f; font-weight: 500;'>查看详细结果并导出CSV报告进行分析</div>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div style='background: linear-gradient(135deg, #dcfce7, #bbf7d0); padding: 1.5rem; border-radius: 12px; margin: 1rem 0;'>
-                                    <div style='font-weight: 600; color: #166534; margin-bottom: 1rem; font-size: 1.1rem;'>💡 最佳实践建议</div>
-                                    <ul style='margin: 0; padding-left: 1.5rem; color: #15803d;'>
-                                        <li style='margin-bottom: 0.5rem;'>对于未知网站，建议开启截图功能进行更全面的分析</li>
-                                        <li style='margin-bottom: 0.5rem;'>批量检测时，建议每次不超过50个URL以确保响应速度</li>
-                                        <li style='margin-bottom: 0.5rem;'>关注HTTP响应头和Cookie设置，这些特征能有效识别威胁</li>
-                                        <li>定期查看历史记录，追踪检测模式的演变</li>
-                                    </ul>
+                                <div style='background: linear-gradient(135deg, #dcfce7, #bbf7d0); padding: 1.5rem; border-radius: 16px; margin: 1rem 0; border: 1px solid #86efac;'>
+                                    <div style='font-weight: 600; color: #166534; margin-bottom: 1rem; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;'>
+                                        <span>💡</span> 高级功能与最佳实践
+                                    </div>
+                                    <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;'>
+                                        <div style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px;'>
+                                            <div style='font-weight: 600; color: #15803d; margin-bottom: 0.5rem; font-size: 0.95rem;'>⌨️ 快捷键</div>
+                                            <div style='color: #166534; font-size: 0.85rem; line-height: 1.5;'>
+                                                Ctrl+Enter: 开始检测<br>
+                                                Ctrl+K: 聚焦输入框<br>
+                                                Ctrl+D: 切换主题
+                                            </div>
+                                        </div>
+                                        <div style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px;'>
+                                            <div style='font-weight: 600; color: #15803d; margin-bottom: 0.5rem; font-size: 0.95rem;'>🎯 智能功能</div>
+                                            <div style='color: #166534; font-size: 0.85rem; line-height: 1.5;'>
+                                                实时URL分析<br>
+                                                智能建议补全<br>
+                                                风险预判系统
+                                            </div>
+                                        </div>
+                                        <div style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px;'>
+                                            <div style='font-weight: 600; color: #15803d; margin-bottom: 0.5rem; font-size: 0.95rem;'>📊 数据分析</div>
+                                            <div style='color: #166534; font-size: 0.85rem; line-height: 1.5;'>
+                                                实时统计面板<br>
+                                                风险分布图表<br>
+                                                历史趋势分析
+                                            </div>
+                                        </div>
+                                        <div style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px;'>
+                                            <div style='font-weight: 600; color: #15803d; margin-bottom: 0.5rem; font-size: 0.95rem;'>🌙 用户体验</div>
+                                            <div style='color: #166534; font-size: 0.85rem; line-height: 1.5;'>
+                                                深色模式支持<br>
+                                                响应式设计<br>
+                                                流畅动画效果
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            """
+                        )
+
+                    with gr.TabItem("⚡ PWA功能"):
+                        gr.HTML(
+                            """
+                            <div class='feature-card glass-effect'>
+                                <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;'>
+                                    <span style='font-size: 1.5rem;'>⚡</span>
+                                    <div style='font-size: 1.3rem; font-weight: 600;'>渐进式Web应用功能</div>
+                                </div>
+
+                                <div style='background: linear-gradient(135deg, #ede9fe, #ddd6fe); padding: 1.5rem; border-radius: 16px; margin: 1rem 0; border: 1px solid #c4b5fd;'>
+                                    <div style='font-weight: 600; color: #5b21b6; margin-bottom: 1rem; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;'>
+                                        <span>📱</span> 离线支持与缓存
+                                    </div>
+                                    <div style='display: flex; flex-direction: column; gap: 0.75rem;'>
+                                        <div style='display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: rgba(255,255,255,0.8); border-radius: 8px;'>
+                                            <span style='font-size: 1.2rem;'>💾</span>
+                                            <div style='color: #5b21b6; font-weight: 500;'>智能缓存系统 - 检测结果自动缓存，离线可查看历史记录</div>
+                                        </div>
+                                        <div style='display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: rgba(255,255,255,0.8); border-radius: 8px;'>
+                                            <span style='font-size: 1.2rem;'>🔄</span>
+                                            <div style='color: #5b21b6; font-weight: 500;'>后台同步 - 网络恢复时自动同步数据</div>
+                                        </div>
+                                        <div style='display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: rgba(255,255,255,0.8); border-radius: 8px;'>
+                                            <span style='font-size: 1.2rem;'>📡</span>
+                                            <div style='color: #5b21b6; font-weight: 500;'>离线检测 - 基础URL分析功能支持离线使用</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div style='background: linear-gradient(135deg, #fce7f3, #fbcfe8); padding: 1.5rem; border-radius: 16px; margin: 1rem 0; border: 1px solid #f9a8d4;'>
+                                    <div style='font-weight: 600; color: #9f1239; margin-bottom: 1rem; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;'>
+                                        <span>🎯</span> 原生应用体验
+                                    </div>
+                                    <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;'>
+                                        <div class='hover-lift' style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px; text-align: center;'>
+                                            <span style='font-size: 1.5rem; display: block; margin-bottom: 0.5rem;'>📲</span>
+                                            <div style='font-weight: 600; color: #9f1239; margin-bottom: 0.25rem;'>可安装</div>
+                                            <div style='color: #be185d; font-size: 0.85rem;'>支持安装到主屏幕</div>
+                                        </div>
+                                        <div class='hover-lift' style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px; text-align: center;'>
+                                            <span style='font-size: 1.5rem; display: block; margin-bottom: 0.5rem;'>🔔</span>
+                                            <div style='font-weight: 600; color: #9f1239; margin-bottom: 0.25rem;'>推送通知</div>
+                                            <div style='color: #be185d; font-size: 0.85rem;'>检测完成实时提醒</div>
+                                        </div>
+                                        <div class='hover-lift' style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px; text-align: center;'>
+                                            <span style='font-size: 1.5rem; display: block; margin-bottom: 0.5rem;'>⚡</span>
+                                            <div style='font-weight: 600; color: #9f1239; margin-bottom: 0.25rem;'>快速启动</div>
+                                            <div style='color: #be185d; font-size: 0.85rem;'>秒级启动检测</div>
+                                        </div>
+                                        <div class='hover-lift' style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px; text-align: center;'>
+                                            <span style='font-size: 1.5rem; display: block; margin-bottom: 0.5rem;'>🌐</span>
+                                            <div style='font-weight: 600; color: #9f1239; margin-bottom: 0.25rem;'>跨平台</div>
+                                            <div style='color: #be185d; font-size: 0.85rem;'>支持所有现代浏览器</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div style='background: linear-gradient(135deg, #f0f9ff, #e0f2fe); padding: 1.5rem; border-radius: 16px; margin: 1rem 0; border: 1px solid #bae6fd;'>
+                                    <div style='font-weight: 600; color: #0c4a6e; margin-bottom: 1rem; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;'>
+                                        <span>🛠️</span> 技术特性
+                                    </div>
+                                    <div style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px;'>
+                                        <div style='font-family: monospace; font-size: 0.85rem; color: #0c4a6e; line-height: 1.6;'>
+                                            <div style='margin-bottom: 0.5rem;'><span style='color: #3b82f6;'>✓</span> Service Worker 支持</div>
+                                            <div style='margin-bottom: 0.5rem;'><span style='color: #3b82f6;'>✓</span> Web App Manifest 配置</div>
+                                            <div style='margin-bottom: 0.5rem;'><span style='color: #3b82f6;'>✓</span> Cache-First 策略</div>
+                                            <div style='margin-bottom: 0.5rem;'><span style='color: #3b82f6;'>✓</span> 响应式设计适配</div>
+                                            <div style='margin-bottom: 0.5rem;'><span style='color: #3b82f6;'>✓</span> 安全 HTTPS 访问</div>
+                                            <div><span style='color: #3b82f6;'>✓</span> 优化的性能表现</div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             """
@@ -1652,6 +3004,42 @@ def build_interface():
             except Exception as exc:
                 return update_single_result(exc, history)
 
+        # 历史记录搜索和过滤功能
+        def on_history_search(search_term: str, show_safe: bool, show_risky: bool, show_danger: bool, history: List[Dict[str, Any]]):
+            filtered_data = filter_history_data(history, search_term, show_safe, show_risky, show_danger)
+            filtered_rows = []
+            for item in filtered_data:
+                filtered_rows.append([
+                    item["time"],
+                    item["url"],
+                    item["probability"],
+                    item["label_text"]
+                ])
+
+            # 更新时间线
+            timeline_html = generate_risk_timeline_html(filtered_data)
+
+            return (
+                gr.update(value=filtered_rows),
+                gr.update(value=timeline_html)
+            )
+
+        history_search.change(
+            fn=on_history_search,
+            inputs=[history_search, filter_safe, filter_risky, filter_danger, history_state],
+            outputs=[history_table, risk_timeline],
+            show_progress=False
+        )
+
+        # 过滤复选框事件
+        for checkbox in [filter_safe, filter_risky, filter_danger]:
+            checkbox.change(
+                fn=on_history_search,
+                inputs=[history_search, filter_safe, filter_risky, filter_danger, history_state],
+                outputs=[history_table, risk_timeline],
+                show_progress=False
+            )
+
         scan_btn.click(
             fn=on_scan_click,
             inputs=[url_input, screenshot_cb, history_state],
@@ -1671,6 +3059,7 @@ def build_interface():
                 status_code,
                 content_type,
                 history_table,
+                risk_timeline,
                 history_state,
             ],
         )
@@ -1757,59 +3146,124 @@ def build_interface():
 
         # 快速验证URL功能
         def on_quick_validate(url: str):
-            if not url or not url.strip():
-                return gr.update(value="""
-                    <div class='feature-card' style='text-align: center; padding: 1rem; border-left: 4px solid #ef4444;'>
-                        <div style='color: #ef4444; font-size: 0.9rem;'>⚠️ 请输入URL</div>
-                    </div>
-                """)
+            """增强的URL验证和分析"""
+            html_content = generate_url_info_html(url)
+            return gr.update(value=html_content)
 
-            is_valid = validate_url_format(url)
-            if is_valid:
-                # 获取URL信息
-                url_info = get_url_info(url)
-                return gr.update(value=url_info)
-            else:
-                return gr.update(value="""
-                    <div class='feature-card' style='text-align: center; padding: 1rem; border-left: 4px solid #ef4444;'>
-                        <div style='color: #ef4444; font-size: 0.9rem;'>❌ URL格式无效</div>
-                        <div style='color: #6b7280; font-size: 0.8rem; margin-top: 0.25rem;'>请检查URL格式</div>
-                    </div>
-                """)
+        def show_url_suggestions(url: str):
+            """显示URL建议"""
+            suggestions = smart_url_suggestions(url)
+            if not suggestions:
+                return gr.update(visible=False)
 
-        # 刷新统计信息
+            suggestions_html = ""
+            <div class='feature-card glass-effect' style='padding: 1rem; margin-top: 0.5rem;'>
+                <div style='font-size: 0.9rem; font-weight: 600; color: #374151; margin-bottom: 0.5rem;'>💡 智能建议</div>
+            ""
+
+            for i, suggestion in enumerate(suggestions):
+                suggestions_html += f"""
+                    <div style='padding: 0.5rem; margin: 0.25rem 0; background: rgba(59, 130, 246, 0.1); border-radius: 8px; cursor: pointer; transition: all 0.2s ease;'
+                         onmouseover="this.style.background='rgba(59, 130, 246, 0.2)'"
+                         onmouseout="this.style.background='rgba(59, 130, 246, 0.1)'"
+                         onclick="document.querySelector('input[type=\"text\"]').value='{suggestion}'">
+                        <div style='font-size: 0.85rem; color: #1e40af; font-weight: 500;'>{suggestion}</div>
+                    </div>
+                """
+
+            suggestions_html += "</div>"
+            return gr.update(visible=True, value=suggestions_html)
+
+        # 增强的统计信息刷新
         def refresh_statistics(history: List[Dict[str, Any]]):
             total = len(history)
             safe = sum(1 for item in history if item.get("label", 0) == 0)
             phish = sum(1 for item in history if item.get("label", 0) == 1)
             accuracy = (safe + phish) / total * 100 if total > 0 else 0
 
-            return gr.update(value=f"""
-                <div class="feature-card">
-                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-                        <span style="font-size: 1.5rem;">📈</span>
-                        <div style="font-size: 1.2rem; font-weight: 600;">检测统计</div>
+            # 计算风险分布
+            low_risk = sum(1 for item in history if item.get("risk_score", 0) < 0.3)
+            medium_risk = sum(1 for item in history if 0.3 <= item.get("risk_score", 0) < 0.7)
+            high_risk = sum(1 for item in history if item.get("risk_score", 0) >= 0.7)
+
+            stats_html = f"""
+                <div class="feature-card glass-effect">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-size: 1.8rem;">📈</span>
+                            <div style="font-size: 1.3rem; font-weight: 600;">实时统计</div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 12px;">
+                            <span style="font-size: 1rem; color: #3b82f6; font-weight: 500;">📊</span>
+                            <span style="font-size: 0.9rem; color: #1e40af;">实时更新</span>
+                        </div>
                     </div>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
-                        <div style="text-align: center; padding: 1rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
-                            <div style="font-size: 1.5rem; font-weight: 700; color: #3b82f6;">{total}</div>
-                            <div style="font-size: 0.9rem; color: #6b7280;">总检测数</div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem;">
+                        <div class="hover-lift" style="text-align: center; padding: 1.2rem; background: linear-gradient(135deg, #f0f9ff, #e0f2fe); border-radius: 12px; border: 1px solid #bae6fd; transition: all 0.3s ease;">
+                            <div style="font-size: 2rem; font-weight: 800; color: #0284c7; margin-bottom: 0.5rem;">{total}</div>
+                            <div style="font-size: 0.9rem; color: #0c4a6e; font-weight: 500;">总检测数</div>
+                            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">实时累计</div>
                         </div>
-                        <div style="text-align: center; padding: 1rem; background: #f0fdf4; border-radius: 8px; border: 1px solid #dcfce7;">
-                            <div style="font-size: 1.5rem; font-weight: 700; color: #22c55e;">{safe}</div>
-                            <div style="font-size: 0.9rem; color: #6b7280;">安全网站</div>
+                        <div class="hover-lift" style="text-align: center; padding: 1.2rem; background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-radius: 12px; border: 1px solid #bbf7d0; transition: all 0.3s ease;">
+                            <div style="font-size: 2rem; font-weight: 800; color: #16a34a; margin-bottom: 0.5rem;">{safe}</div>
+                            <div style="font-size: 0.9rem; color: #14532d; font-weight: 500;">安全网站</div>
+                            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">可信域名</div>
                         </div>
-                        <div style="text-align: center; padding: 1rem; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca;">
-                            <div style="font-size: 1.5rem; font-weight: 700; color: #ef4444;">{phish}</div>
-                            <div style="font-size: 0.9rem; color: #6b7280;">危险网站</div>
+                        <div class="hover-lift" style="text-align: center; padding: 1.2rem; background: linear-gradient(135deg, #fef2f2, #fee2e2); border-radius: 12px; border: 1px solid #fecaca; transition: all 0.3s ease;">
+                            <div style="font-size: 2rem; font-weight: 800; color: #dc2626; margin-bottom: 0.5rem;">{phish}</div>
+                            <div style="font-size: 0.9rem; color: #991b1b; font-weight: 500;">危险网站</div>
+                            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">钓鱼威胁</div>
                         </div>
-                        <div style="text-align: center; padding: 1rem; background: #fefce8; border-radius: 8px; border: 1px solid #fef3c7;">
-                            <div style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;">{accuracy:.1f}%</div>
-                            <div style="font-size: 0.9rem; color: #6b7280;">检测准确率</div>
+                        <div class="hover-lift" style="text-align: center; padding: 1.2rem; background: linear-gradient(135deg, #fefce8, #fef3c7); border-radius: 12px; border: 1px solid #fef3c7; transition: all 0.3s ease;">
+                            <div style="font-size: 2rem; font-weight: 800; color: #d97706; margin-bottom: 0.5rem;">{accuracy:.1f}%</div>
+                            <div style="font-size: 0.9rem; color: #92400e; font-weight: 500;">检测准确率</div>
+                            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">模型精度</div>
                         </div>
                     </div>
                 </div>
-            """)
+            """
+
+            risk_html = f"""
+                <div class="feature-card glass-effect">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+                        <span style="font-size: 1.3rem;">🎯</span>
+                        <div style="font-size: 1.1rem; font-weight: 600;">风险分布</div>
+                    </div>
+                    <div style="background: #f8fafc; border-radius: 8px; padding: 1rem;">
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <div style="width: 12px; height: 12px; background: #22c55e; border-radius: 50%;"></div>
+                                <div style="font-size: 0.85rem; color: #374151; flex: 1;">低风险</div>
+                                <div style="font-size: 0.85rem; font-weight: 600; color: #16a34a;">{low_risk}</div>
+                            </div>
+                            <div style="background: #e5e7eb; height: 6px; border-radius: 3px; overflow: hidden;">
+                                <div style="width: {(low_risk/total*100) if total > 0 else 0}%; height: 100%; background: #22c55e; transition: width 0.5s ease;"></div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <div style="width: 12px; height: 12px; background: #f59e0b; border-radius: 50%;"></div>
+                                <div style="font-size: 0.85rem; color: #374151; flex: 1;">中风险</div>
+                                <div style="font-size: 0.85rem; font-weight: 600; color: #d97706;">{medium_risk}</div>
+                            </div>
+                            <div style="background: #e5e7eb; height: 6px; border-radius: 3px; overflow: hidden;">
+                                <div style="width: {(medium_risk/total*100) if total > 0 else 0}%; height: 100%; background: #f59e0b; transition: width 0.5s ease;"></div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <div style="width: 12px; height: 12px; background: #ef4444; border-radius: 50%;"></div>
+                                <div style="font-size: 0.85rem; color: #374151; flex: 1;">高风险</div>
+                                <div style="font-size: 0.85rem; font-weight: 600; color: #dc2626;">{high_risk}</div>
+                            </div>
+                            <div style="background: #e5e7eb; height: 6px; border-radius: 3px; overflow: hidden;">
+                                <div style="width: {(high_risk/total*100) if total > 0 else 0}%; height: 100%; background: #ef4444; transition: width 0.5s ease;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            """
+
+            return (
+                gr.update(value=stats_html),
+                gr.update(value=risk_html)
+            )
 
         def on_batch_scan(urls: str, screenshot: bool):
             # 输入验证
@@ -1957,15 +3411,191 @@ def build_interface():
         stats_refresh_btn.click(
             fn=refresh_statistics,
             inputs=[history_state],
-            outputs=[stats_display]
+            outputs=[stats_display, risk_distribution]
         )
 
-        # URL输入变化时自动更新URL信息显示
+        # 在扫描完成后自动刷新统计
+        def auto_refresh_stats_on_scan(result, history):
+            return refresh_statistics(history)
+
+        scan_btn.click(
+            fn=auto_refresh_stats_on_scan,
+            inputs=[url_input, history_state],
+            outputs=[stats_display, risk_distribution],
+            show_progress=False
+        ).then(
+            fn=on_scan_click,
+            inputs=[url_input, screenshot_cb, history_state],
+            outputs=[
+                conclusion_box,
+                status_indicator,
+                probability_summary,
+                detail_summary,
+                pred_json,
+                details_json,
+                features_markdown,
+                http_markdown,
+                cookie_markdown,
+                meta_markdown,
+                screenshot_image,
+                final_url,
+                status_code,
+                content_type,
+                history_table,
+                history_state,
+            ],
+        )
+
+        # 增强的URL输入事件处理
         url_input.change(
             fn=on_quick_validate,
             inputs=[url_input],
             outputs=[url_info_display],
             show_progress=False
+        )
+
+        # URL输入时显示建议
+        url_input.change(
+            fn=show_url_suggestions,
+            inputs=[url_input],
+            outputs=[url_suggestions],
+            show_progress=False
+        )
+
+        # 深色模式切换功能
+        def toggle_dark_mode():
+            return gr.HTML(
+                """
+                <script>
+                    document.body.classList.toggle('dark-mode');
+                    localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
+                </script>
+                """
+            )
+
+        dark_mode_btn.click(
+            fn=toggle_dark_mode,
+            outputs=[],
+            js="""
+            function() {
+                document.body.classList.toggle('dark-mode');
+                localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
+
+                // 更新按钮文本
+                const btn = document.querySelector('button[aria-label*="深色模式"]');
+                if (btn) {
+                    btn.innerHTML = document.body.classList.contains('dark-mode') ? '☀️ 浅色模式' : '🌙 深色模式';
+                }
+            }
+            """
+        )
+
+        # 页面加载时恢复深色模式设置
+        demo.load(
+            fn=lambda: None,
+            outputs=[],
+            js="""
+            function() {
+                // 恢复深色模式设置
+                const darkMode = localStorage.getItem('darkMode') === 'true';
+                if (darkMode) {
+                    document.body.classList.add('dark-mode');
+                    const btn = document.querySelector('button[aria-label*="深色模式"]');
+                    if (btn) {
+                        btn.innerHTML = '☀️ 浅色模式';
+                    }
+                }
+
+                // 添加鼠标跟随效果
+                document.addEventListener('mousemove', (e) => {
+                    const cards = document.querySelectorAll('.feature-card, .gradient-bg');
+                    cards.forEach(card => {
+                        const rect = card.getBoundingClientRect();
+                        const x = ((e.clientX - rect.left) / rect.width) * 100;
+                        const y = ((e.clientY - rect.top) / rect.height) * 100;
+                        card.style.setProperty('--card-mouse-x', `${x}%`);
+                        card.style.setProperty('--card-mouse-y', `${y}%`);
+                    });
+                });
+
+                // 添加键盘快捷键
+                document.addEventListener('keydown', (e) => {
+                    // Ctrl/Cmd + Enter: 开始检测
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                        const scanBtn = document.querySelector('button[aria-label*="开始检测"]');
+                        if (scanBtn) scanBtn.click();
+                    }
+                    // Ctrl/Cmd + K: 聚焦到URL输入框
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                        e.preventDefault();
+                        const urlInput = document.querySelector('input[type="text"]');
+                        if (urlInput) {
+                            urlInput.focus();
+                            urlInput.select();
+                        }
+                    }
+                    // Ctrl/Cmd + D: 切换深色模式
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+                        e.preventDefault();
+                        const darkModeBtn = document.querySelector('button[aria-label*="深色模式"], button[aria-label*="浅色模式"]');
+                        if (darkModeBtn) darkModeBtn.click();
+                    }
+                });
+
+                // 添加加载动画
+                const observer = new MutationObserver((mutations) => {
+                    mutations.forEach((mutation) => {
+                        if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                            const target = mutation.target;
+                            if (target.classList.contains('loading')) {
+                                // 显示加载动画
+                                const loadingHtml = `
+                                    <div class="loading-dots">
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                    </div>
+                                    <div style="text-align: center; margin-top: 1rem; color: #6b7280; font-size: 0.9rem;">
+                                        正在分析中，请稍候...
+                                    </div>
+                                `;
+                                // 这里可以根据需要添加加载动画
+                            }
+                        }
+                    });
+                });
+
+                // 监听所有按钮点击
+                document.addEventListener('click', (e) => {
+                    if (e.target.tagName === 'BUTTON') {
+                        // 添加点击涟漪效果
+                        const ripple = document.createElement('span');
+                        ripple.style.position = 'absolute';
+                        ripple.style.borderRadius = '50%';
+                        ripple.style.background = 'rgba(255, 255, 255, 0.5)';
+                        ripple.style.pointerEvents = 'none';
+                        ripple.style.transform = 'translate(-50%, -50%)';
+                        ripple.style.animation = 'ripple 0.6s ease-out';
+
+                        const rect = e.target.getBoundingClientRect();
+                        ripple.style.left = `${e.clientX - rect.left}px`;
+                        ripple.style.top = `${e.clientY - rect.top}px`;
+                        ripple.style.width = '0px';
+                        ripple.style.height = '0px';
+
+                        e.target.style.position = 'relative';
+                        e.target.style.overflow = 'hidden';
+                        e.target.appendChild(ripple);
+
+                        setTimeout(() => ripple.remove(), 600);
+                    }
+                });
+
+                // 初始化提示
+                console.log('🚀 PhishGuard UI 已加载完成');
+                console.log('快捷键: Ctrl+Enter 开始检测 | Ctrl+K 聚焦输入 | Ctrl+D 切换主题');
+            }
+            """
         )
 
         # 添加导出历史功能连接
