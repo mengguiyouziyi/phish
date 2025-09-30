@@ -180,29 +180,72 @@ def generate_conclusion_html(pred: Dict[str, Any]) -> str:
     fusion_prob = pred.get("fusion_prob")
     final_prob = pred.get("final_prob", 0)
     label = pred.get("label", 0)
-    risk_level, _ = get_risk_level(final_prob)
+    risk_level, risk_class = get_risk_level(final_prob)
+
+    # 生成概率条
+    def generate_progress_bar(prob, color, label):
+        percentage = prob * 100
+        return f"""
+        <div style="margin: 0.5rem 0;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                <span style="font-size: 0.9rem; font-weight: 500;">{label}</span>
+                <span style="font-size: 0.9rem;">{format_probability(prob)}</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: {percentage}%; background: {color};"></div>
+            </div>
+        </div>
+        """
 
     if label == 1:
         return (
-            "<div class='result-section' style='background: linear-gradient(135deg, #fef2f2, #fee2e2); border-left: 4px solid #ef4444;'>"
-            f"<div style='font-size: 1.3rem; font-weight: 600; color: #dc2626; margin-bottom: 0.5rem;'>🚨 检测为钓鱼网站</div>"
-            f"<div style='color: #7f1d1d; font-size: 1rem; margin-bottom: 0.5rem;'>风险等级: {risk_level} ({format_probability(final_prob)})</div>"
-            f"<div style='color: #991b1b; font-size: 0.9rem; margin-bottom: 0.5rem;'>URL模型: {format_probability(url_prob)}</div>"
-            f"<div style='color: #991b1b; font-size: 0.9rem; margin-bottom: 0.5rem;'>FusionDNN模型: {format_probability(fusion_prob) if fusion_prob is not None else 'N/A'}</div>"
-            "<div style='color: #991b1b; font-size: 0.9rem; padding: 0.5rem; background: #fecaca; border-radius: 6px; margin-top: 0.5rem;'>"
-            "⚠️ 请谨慎访问，建议使用安全工具进行进一步检查"
+            "<div class='result-section' style='background: linear-gradient(135deg, #fef2f2, #fee2e2); border-left: 4px solid #ef4444; position: relative;'>"
+            "<div style='position: absolute; top: 1rem; right: 1rem; background: #ef4444; color: white; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;'>HIGH RISK</div>"
+            f"<div style='font-size: 1.5rem; font-weight: 700; color: #dc2626; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;'>🚨 检测为钓鱼网站</div>"
+            f"<div style='color: #7f1d1d; font-size: 1.1rem; margin-bottom: 1rem;'>风险等级: <span style='font-weight: 600;'>{risk_level}</span> ({format_probability(final_prob)})</div>"
+
+            "<div style='margin: 1rem 0;'>"
+            f"<div style='font-size: 1rem; font-weight: 600; color: #991b1b; margin-bottom: 0.75rem;'>📊 模型分析</div>"
+            f"{generate_progress_bar(url_prob, '#ef4444', 'URL模型')}"
+            f"{generate_progress_bar(fusion_prob if fusion_prob is not None else 0, '#ef4444', 'FusionDNN模型')}"
+            f"{generate_progress_bar(final_prob, '#dc2626', '综合风险')}"
+            "</div>"
+
+            "<div style='display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;'>"
+            "<div style='background: #fecaca; padding: 1rem; border-radius: 8px; border-left: 3px solid #ef4444;'>"
+            "<div style='font-size: 0.9rem; font-weight: 600; color: #991b1b; margin-bottom: 0.5rem;'>⚠️ 安全建议</div>"
+            "<div style='font-size: 0.85rem; color: #7f1d1d;'>立即停止访问，使用安全工具扫描系统</div>"
+            "</div>"
+            "<div style='background: #fee2e2; padding: 1rem; border-radius: 8px; border-left: 3px solid #fca5a5;'>"
+            "<div style='font-size: 0.9rem; font-weight: 600; color: #991b1b; margin-bottom: 0.5rem;'>🔒 推荐行动</div>"
+            "<div style='font-size: 0.85rem; color: #7f1d1d;'>举报该网站，修改密码并监控账户</div>"
+            "</div>"
             "</div>"
             "</div>"
         )
     else:
         return (
-            "<div class='result-section' style='background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 4px solid #22c55e;'>"
-            f"<div style='font-size: 1.3rem; font-weight: 600; color: #166534; margin-bottom: 0.5rem;'>✅ 检测为良性网站</div>"
-            f"<div style='color: #14532d; font-size: 1rem; margin-bottom: 0.5rem;'>风险等级: {risk_level} ({format_probability(final_prob)})</div>"
-            f"<div style='color: #166534; font-size: 0.9rem; margin-bottom: 0.5rem;'>URL模型: {format_probability(url_prob)}</div>"
-            f"<div style='color: #166534; font-size: 0.9rem; margin-bottom: 0.5rem;'>FusionDNN模型: {format_probability(fusion_prob) if fusion_prob is not None else 'N/A'}</div>"
-            "<div style='color: #166534; font-size: 0.9rem; padding: 0.5rem; background: #bbf7d0; border-radius: 6px; margin-top: 0.5rem;'>"
-            "🛡️ 网站看起来是安全的，但仍需保持警惕"
+            "<div class='result-section' style='background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 4px solid #22c55e; position: relative;'>"
+            "<div style='position: absolute; top: 1rem; right: 1rem; background: #22c55e; color: white; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;'>SAFE</div>"
+            f"<div style='font-size: 1.5rem; font-weight: 700; color: #166534; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;'>✅ 检测为良性网站</div>"
+            f"<div style='color: #14532d; font-size: 1.1rem; margin-bottom: 1rem;'>风险等级: <span style='font-weight: 600;'>{risk_level}</span> ({format_probability(final_prob)})</div>"
+
+            "<div style='margin: 1rem 0;'>"
+            f"<div style='font-size: 1rem; font-weight: 600; color: #166534; margin-bottom: 0.75rem;'>📊 模型分析</div>"
+            f"{generate_progress_bar(url_prob, '#22c55e', 'URL模型')}"
+            f"{generate_progress_bar(fusion_prob if fusion_prob is not None else 0, '#22c55e', 'FusionDNN模型')}"
+            f"{generate_progress_bar(final_prob, '#16a34a', '综合风险')}"
+            "</div>"
+
+            "<div style='display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;'>"
+            "<div style='background: #bbf7d0; padding: 1rem; border-radius: 8px; border-left: 3px solid #22c55e;'>"
+            "<div style='font-size: 0.9rem; font-weight: 600; color: #166534; margin-bottom: 0.5rem;'>🛡️ 安全状态</div>"
+            "<div style='font-size: 0.85rem; color: #14532d;'>网站技术特征正常，无明显风险</div>"
+            "</div>"
+            "<div style='background: #dcfce7; padding: 1rem; border-radius: 8px; border-left: 3px solid #86efac;'>"
+            "<div style='font-size: 0.9rem; font-weight: 600; color: #166534; margin-bottom: 0.5rem;'>💡 建议措施</div>"
+            "<div style='font-size: 0.85rem; color: #14532d;'>保持警惕，启用双因子认证</div>"
+            "</div>"
             "</div>"
             "</div>"
         )
@@ -453,6 +496,66 @@ async def scan_multiple(urls_text: str, screenshot: bool) -> List[Any]:
     return await asyncio.gather(*tasks, return_exceptions=True)
 
 
+def clear_history(history_state):
+    """清空历史记录"""
+    return [], [], "历史记录已清空"
+
+def export_history(history_state):
+    """导出历史记录为CSV格式"""
+    if not history_state:
+        return "暂无历史记录可导出"
+
+    import csv
+    import io
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # 写入标题行
+    writer.writerow(['时间', 'URL', '综合概率', 'URL模型概率', 'FusionDNN概率', '结果'])
+
+    # 写入数据行
+    for entry in history_state:
+        writer.writerow([
+            entry.get('timestamp', ''),
+            entry.get('url', ''),
+            entry.get('probability', ''),
+            entry.get('url_prob', ''),
+            entry.get('fusion_prob', ''),
+            entry.get('label_text', '')
+        ])
+
+    return output.getvalue()
+
+def validate_url_format(url):
+    """快速验证URL格式"""
+    import re
+    url_pattern = re.compile(
+        r'^https?://'  # http:// or https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # domain...
+        r'localhost|'  # localhost...
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
+        r'(?::\d+)?'  # optional port
+        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+
+    return url_pattern.match(url) is not None
+
+def get_url_info(url):
+    """获取URL基本信息"""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        return {
+            'domain': parsed.netloc,
+            'scheme': parsed.scheme,
+            'path': parsed.path,
+            'query': parsed.query,
+            'is_https': parsed.scheme == 'https',
+            'has_subdomain': len(parsed.netloc.split('.')) > 2
+        }
+    except:
+        return {}
+
 def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
     str,
     str,
@@ -626,6 +729,7 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
 
 def build_interface():
     custom_css = """
+    /* 全局样式 */
     .main-container {
         max-width: 1400px;
         margin: auto;
@@ -634,82 +738,316 @@ def build_interface():
 
     .gradio-container {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        min-height: 100vh;
     }
 
+    /* 风险等级样式 */
     .risk-safe {
-        background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%) !important;
-        border: 1px solid #16a34a !important;
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+        border: 1px solid #047857 !important;
+        color: white !important;
+        animation: pulse-safe 2s infinite;
     }
 
     .risk-warning {
-        background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%) !important;
-        border: 1px solid #d97706 !important;
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
+        border: 1px solid #b45309 !important;
+        color: white !important;
+        animation: pulse-warning 2s infinite;
     }
 
     .risk-danger {
-        background: linear-gradient(135deg, #f87171 0%, #ef4444 100%) !important;
-        border: 1px solid #dc2626 !important;
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+        border: 1px solid #b91c1c !important;
+        color: white !important;
+        animation: pulse-danger 2s infinite;
     }
 
+    @keyframes pulse-safe {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+        50% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+    }
+
+    @keyframes pulse-warning {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+        50% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+    }
+
+    @keyframes pulse-danger {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+        50% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+    }
+
+    /* 头部样式 */
     .gradient-bg {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
         color: white;
-        padding: 2rem;
-        border-radius: 1rem;
+        padding: 2.5rem;
+        border-radius: 1.5rem;
         margin-bottom: 2rem;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-    }
-
-    .feature-card {
-        background: white;
-        border-radius: 12px;
-        padding: 1.5rem;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.07);
-        border: 1px solid #e5e7eb;
-        transition: all 0.3s ease;
-    }
-
-    .feature-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 15px rgba(0,0,0,0.1);
-    }
-
-    .status-indicator {
-        border-radius: 12px;
-        padding: 1.5rem;
-        text-align: center;
-        font-weight: 600;
-        transition: all 0.3s ease;
-        border: 2px solid transparent;
-    }
-
-    .tab-nav {
-        border-bottom: 2px solid #e5e7eb;
-        margin-bottom: 2rem;
-    }
-
-    .result-section {
-        background: #f9fafb;
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        border: 1px solid #e5e7eb;
-    }
-
-    .history-table {
-        border-radius: 8px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        position: relative;
         overflow: hidden;
     }
 
+    .gradient-bg::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
+        transform: rotate(45deg);
+        animation: shimmer 3s infinite;
+    }
+
+    @keyframes shimmer {
+        0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+        100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+    }
+
+    /* 卡片样式 */
+    .feature-card {
+        background: white;
+        border-radius: 16px;
+        padding: 2rem;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+        border: 1px solid #e2e8f0;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .feature-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899);
+        transform: scaleX(0);
+        transition: transform 0.3s ease;
+    }
+
+    .feature-card:hover::before {
+        transform: scaleX(1);
+    }
+
+    .feature-card:hover {
+        transform: translateY(-8px) scale(1.02);
+        box-shadow: 0 20px 40px rgba(0,0,0,0.12);
+    }
+
+    /* 状态指示器 */
+    .status-indicator {
+        border-radius: 20px;
+        padding: 2rem;
+        text-align: center;
+        font-weight: 700;
+        transition: all 0.4s ease;
+        border: 3px solid transparent;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .status-indicator::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        background: rgba(255,255,255,0.2);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        transition: all 0.6s ease;
+    }
+
+    .status-indicator:hover::after {
+        width: 100%;
+        height: 100%;
+    }
+
+    /* 进度条样式 */
+    .progress-bar {
+        width: 100%;
+        height: 8px;
+        background: #e2e8f0;
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 1rem 0;
+    }
+
+    .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+        border-radius: 10px;
+        transition: width 0.6s ease;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .progress-fill::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        right: 0;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+        animation: progress-shimmer 2s infinite;
+    }
+
+    @keyframes progress-shimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+    }
+
+    /* 标签页样式 */
+    .tab-nav {
+        border-bottom: 3px solid #e2e8f0;
+        margin-bottom: 2rem;
+        position: relative;
+    }
+
+    /* 结果展示区域 */
+    .result-section {
+        background: white;
+        border-radius: 16px;
+        padding: 2rem;
+        margin: 1.5rem 0;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        transition: all 0.3s ease;
+        position: relative;
+    }
+
+    .result-section:hover {
+        box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+    }
+
+    /* 历史表格样式 */
+    .history-table {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+
+    /* 按钮样式 */
     .btn-primary {
-        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
         border: none !important;
-        transition: all 0.3s ease !important;
+        color: white !important;
+        font-weight: 600 !important;
+        padding: 12px 24px !important;
+        border-radius: 12px !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        position: relative !important;
+        overflow: hidden !important;
+    }
+
+    .btn-primary::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        transition: left 0.5s ease;
+    }
+
+    .btn-primary:hover::before {
+        left: 100%;
     }
 
     .btn-primary:hover {
-        transform: translateY(-1px) !important;
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4) !important;
+        transform: translateY(-2px) scale(1.05) !important;
+        box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4) !important;
+    }
+
+    .btn-primary:active {
+        transform: translateY(0) scale(0.98) !important;
+    }
+
+    /* 输入框样式 */
+    .gradio-textbox {
+        border-radius: 12px !important;
+        border: 2px solid #e2e8f0 !important;
+        transition: all 0.3s ease !important;
+    }
+
+    .gradio-textbox:focus {
+        border-color: #3b82f6 !important;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+    }
+
+    /* 加载动画 */
+    .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #e2e8f0;
+        border-top: 4px solid #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 20px auto;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    /* 工具提示样式 */
+    .tooltip {
+        position: relative;
+        cursor: help;
+    }
+
+    .tooltip::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1f2937;
+        color: white;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 12px;
+        white-space: nowrap;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s ease;
+        z-index: 1000;
+    }
+
+    .tooltip:hover::after {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    /* 响应式设计 */
+    @media (max-width: 768px) {
+        .main-container {
+            padding: 10px;
+        }
+
+        .gradient-bg {
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card {
+            padding: 1.5rem;
+        }
+
+        .status-indicator {
+            padding: 1.5rem;
+        }
     }
     """
 
@@ -769,10 +1107,21 @@ def build_interface():
                         )
                     with gr.Column(scale=1):
                         with gr.Group():
+                            url_info_display = gr.HTML(
+                                "<div class='feature-card' style='text-align: center; padding: 1rem;'>"
+                                "<div style='font-size: 0.9rem; color: #6b7280; margin-bottom: 0.5rem;'>🔗 URL信息</div>"
+                                "<div style='font-size: 0.85rem; color: #9ca3af;'>输入URL后显示分析</div>"
+                                "</div>"
+                            )
                             screenshot_cb = gr.Checkbox(
                                 label="📸 启用截图功能",
                                 value=False,
                                 info="生成页面截图"
+                            )
+                            quick_validate_btn = gr.Button(
+                                "⚡ 快速验证",
+                                variant="secondary",
+                                size="sm"
                             )
                             scan_btn = gr.Button(
                                 "🔍 开始检测",
@@ -903,6 +1252,38 @@ def build_interface():
                                 show_download_button=True
                             )
 
+                with gr.Accordion("📊 统计信息", open=True):
+                    with gr.Row():
+                        with gr.Column():
+                            stats_display = gr.HTML(
+                                """
+                                <div class="feature-card">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+                                        <span style="font-size: 1.5rem;">📈</span>
+                                        <div style="font-size: 1.2rem; font-weight: 600;">检测统计</div>
+                                    </div>
+                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+                                        <div style="text-align: center; padding: 1rem; background: #f8fafc; border-radius: 8px;">
+                                            <div style="font-size: 1.5rem; font-weight: 700; color: #3b82f6;">0</div>
+                                            <div style="font-size: 0.9rem; color: #6b7280;">总检测数</div>
+                                        </div>
+                                        <div style="text-align: center; padding: 1rem; background: #f0fdf4; border-radius: 8px;">
+                                            <div style="font-size: 1.5rem; font-weight: 700; color: #22c55e;">0</div>
+                                            <div style="font-size: 0.9rem; color: #6b7280;">安全网站</div>
+                                        </div>
+                                        <div style="text-align: center; padding: 1rem; background: #fef2f2; border-radius: 8px;">
+                                            <div style="font-size: 1.5rem; font-weight: 700; color: #ef4444;">0</div>
+                                            <div style="font-size: 0.9rem; color: #6b7280;">危险网站</div>
+                                        </div>
+                                        <div style="text-align: center; padding: 1rem; background: #fefce8; border-radius: 8px;">
+                                            <div style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;">0%</div>
+                                            <div style="font-size: 0.9rem; color: #6b7280;">检测准确率</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                """
+                            )
+
                 with gr.Accordion("🗂 历史记录", open=False):
                     with gr.Row():
                         with gr.Column(scale=4):
@@ -921,6 +1302,11 @@ def build_interface():
                             )
                             export_history_btn = gr.Button(
                                 "📥 导出历史",
+                                variant="secondary",
+                                size="sm"
+                            )
+                            stats_refresh_btn = gr.Button(
+                                "🔄 刷新统计",
                                 variant="secondary",
                                 size="sm"
                             )
@@ -1369,6 +1755,62 @@ def build_interface():
 
         clear_history_btn.click(fn=clear_history, outputs=[history_table, history_state])
 
+        # 快速验证URL功能
+        def on_quick_validate(url: str):
+            if not url or not url.strip():
+                return gr.update(value="""
+                    <div class='feature-card' style='text-align: center; padding: 1rem; border-left: 4px solid #ef4444;'>
+                        <div style='color: #ef4444; font-size: 0.9rem;'>⚠️ 请输入URL</div>
+                    </div>
+                """)
+
+            is_valid = validate_url_format(url)
+            if is_valid:
+                # 获取URL信息
+                url_info = get_url_info(url)
+                return gr.update(value=url_info)
+            else:
+                return gr.update(value="""
+                    <div class='feature-card' style='text-align: center; padding: 1rem; border-left: 4px solid #ef4444;'>
+                        <div style='color: #ef4444; font-size: 0.9rem;'>❌ URL格式无效</div>
+                        <div style='color: #6b7280; font-size: 0.8rem; margin-top: 0.25rem;'>请检查URL格式</div>
+                    </div>
+                """)
+
+        # 刷新统计信息
+        def refresh_statistics(history: List[Dict[str, Any]]):
+            total = len(history)
+            safe = sum(1 for item in history if item.get("label", 0) == 0)
+            phish = sum(1 for item in history if item.get("label", 0) == 1)
+            accuracy = (safe + phish) / total * 100 if total > 0 else 0
+
+            return gr.update(value=f"""
+                <div class="feature-card">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+                        <span style="font-size: 1.5rem;">📈</span>
+                        <div style="font-size: 1.2rem; font-weight: 600;">检测统计</div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+                        <div style="text-align: center; padding: 1rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #3b82f6;">{total}</div>
+                            <div style="font-size: 0.9rem; color: #6b7280;">总检测数</div>
+                        </div>
+                        <div style="text-align: center; padding: 1rem; background: #f0fdf4; border-radius: 8px; border: 1px solid #dcfce7;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #22c55e;">{safe}</div>
+                            <div style="font-size: 0.9rem; color: #6b7280;">安全网站</div>
+                        </div>
+                        <div style="text-align: center; padding: 1rem; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #ef4444;">{phish}</div>
+                            <div style="font-size: 0.9rem; color: #6b7280;">危险网站</div>
+                        </div>
+                        <div style="text-align: center; padding: 1rem; background: #fefce8; border-radius: 8px; border: 1px solid #fef3c7;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;">{accuracy:.1f}%</div>
+                            <div style="font-size: 0.9rem; color: #6b7280;">检测准确率</div>
+                        </div>
+                    </div>
+                </div>
+            """)
+
         def on_batch_scan(urls: str, screenshot: bool):
             # 输入验证
             if not urls or not urls.strip():
@@ -1503,6 +1945,34 @@ def build_interface():
         refresh_tables_btn.click(
             fn=update_tables_from_data,
             outputs=[phishing_examples, benign_examples]
+        )
+
+        # 添加新功能的连接事件
+        quick_validate_btn.click(
+            fn=on_quick_validate,
+            inputs=[url_input],
+            outputs=[url_info_display]
+        )
+
+        stats_refresh_btn.click(
+            fn=refresh_statistics,
+            inputs=[history_state],
+            outputs=[stats_display]
+        )
+
+        # URL输入变化时自动更新URL信息显示
+        url_input.change(
+            fn=on_quick_validate,
+            inputs=[url_input],
+            outputs=[url_info_display],
+            show_progress=False
+        )
+
+        # 添加导出历史功能连接
+        export_history_btn.click(
+            fn=export_history,
+            inputs=[history_state],
+            outputs=[]
         )
 
     return demo
