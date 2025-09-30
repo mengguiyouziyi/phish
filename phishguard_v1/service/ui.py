@@ -83,13 +83,13 @@ def build_http_summary_block(features: Dict[str, Any]) -> str:
     lines = ["### 🌐 HTTP 信息"]
     status = features.get("status_code")
     if status is not None:
-        lines.append(f"- **状态码**：{status}")
+        lines.append(f"- **状态码**:{status}")
     content_type = features.get("content_type")
     if content_type:
-        lines.append(f"- **Content-Type**：{content_type}")
+        lines.append(f"- **Content-Type**:{content_type}")
     redirects = (features.get("meta") or {}).get("redirects") or []
     if redirects:
-        lines.append(f"- **重定向链路**：{' → '.join(_md_escape(r) for r in redirects[:5])}")
+        lines.append(f"- **重定向链路**:{' → '.join(_md_escape(r) for r in redirects[:5])}")
 
     headers = features.get("headers") or {}
     if headers:
@@ -106,7 +106,7 @@ def build_cookie_summary_block(features: Dict[str, Any]) -> str:
     cookies = features.get("cookies") or {}
     set_cookie = features.get("set_cookie") or ""
     if cookies:
-        lines.append(f"- **Cookie 总数**：{len(cookies)}")
+        lines.append(f"- **Cookie 总数**:{len(cookies)}")
         lines.append("| Cookie | 值 |\n| --- | --- |")
         for key, value in list(cookies.items())[:10]:
             lines.append(f"| {_md_escape(key)} | {_md_escape(value)} |")
@@ -114,7 +114,7 @@ def build_cookie_summary_block(features: Dict[str, Any]) -> str:
         lines.append("- 未检测到响应 Cookie。")
     if set_cookie:
         preview = _md_escape(set_cookie[:300]) + ("…" if len(set_cookie) > 300 else "")
-        lines.append(f"- **Set-Cookie 原始串（截断）**：`{preview}`")
+        lines.append(f"- **Set-Cookie 原始串（截断）**:`{preview}`")
     return "\n".join(lines)
 
 
@@ -132,9 +132,9 @@ def build_meta_summary_block(features: Dict[str, Any]) -> str:
     script_srcs = html_feats.get("script_srcs") or []
     stylesheets = html_feats.get("stylesheets") or []
     if script_srcs or stylesheets:
-        lines.append("\n- **外部脚本**：")
+        lines.append("\n- **外部脚本**:")
         lines.extend([f"  - {_md_escape(src)}" for src in script_srcs[:5]])
-        lines.append("- **外部样式表**：")
+        lines.append("- **外部样式表**:")
         lines.extend([f"  - {_md_escape(href)}" for href in stylesheets[:5]])
     return "\n".join(lines)
 
@@ -160,18 +160,18 @@ def generate_conclusion(pred: Dict[str, Any]) -> str:
     label = pred.get("label", 0)
 
     parts = []
-    parts.append("🚨 **检测结果：钓鱼网站**" if label == 1 else "✅ **检测结果：良性网站**")
+    parts.append("警告 **检测结果:钓鱼网站**" if label == 1 else "安全 **检测结果:良性网站**")
     risk_level, _ = get_risk_level(final_prob)
-    parts.append(f"📊 **风险等级：{risk_level}** ({format_probability(final_prob)})")
+    parts.append(f"统计 **风险等级:{risk_level}** ({format_probability(final_prob)})")
 
-    parts.append("🤖 **模型分析：**")
-    parts.append(f"   - URL 预训练模型：{format_probability(url_prob)}")
+    parts.append("🤖 **模型分析:**")
+    parts.append(f"   - URL 预训练模型:{format_probability(url_prob)}")
     if fusion_prob is not None:
-        parts.append(f"   - FusionDNN 模型：{format_probability(fusion_prob)}")
+        parts.append(f"   - FusionDNN 模型:{format_probability(fusion_prob)}")
     else:
-        parts.append("   - FusionDNN 模型：未参与融合")
+        parts.append("   - FusionDNN 模型:未参与融合")
 
-    parts.append("⚠️ **建议：** 避免访问此网站，可能存在安全风险" if label == 1 else "💡 **建议：** 网站看起来安全，但仍需保持警惕")
+    parts.append("注意 **建议:** 避免访问此网站，可能存在安全风险" if label == 1 else "提示 **建议:** 网站看起来安全，但仍需保持警惕")
     return "\n\n".join(parts)
 
 
@@ -201,11 +201,11 @@ def generate_conclusion_html(pred: Dict[str, Any]) -> str:
         return (
             "<div class='result-section' style='background: linear-gradient(135deg, #fef2f2, #fee2e2); border-left: 4px solid #ef4444; position: relative;'>"
             "<div style='position: absolute; top: 1rem; right: 1rem; background: #ef4444; color: white; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;'>HIGH RISK</div>"
-            f"<div style='font-size: 1.5rem; font-weight: 700; color: #dc2626; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;'>🚨 检测为钓鱼网站</div>"
+            f"<div style='font-size: 1.5rem; font-weight: 700; color: #dc2626; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;'>警告 检测为钓鱼网站</div>"
             f"<div style='color: #7f1d1d; font-size: 1.1rem; margin-bottom: 1rem;'>风险等级: <span style='font-weight: 600;'>{risk_level}</span> ({format_probability(final_prob)})</div>"
 
             "<div style='margin: 1rem 0;'>"
-            f"<div style='font-size: 1rem; font-weight: 600; color: #991b1b; margin-bottom: 0.75rem;'>📊 模型分析</div>"
+            f"<div style='font-size: 1rem; font-weight: 600; color: #991b1b; margin-bottom: 0.75rem;'>统计 模型分析</div>"
             f"{generate_progress_bar(url_prob, '#ef4444', 'URL模型')}"
             f"{generate_progress_bar(fusion_prob if fusion_prob is not None else 0, '#ef4444', 'FusionDNN模型')}"
             f"{generate_progress_bar(final_prob, '#dc2626', '综合风险')}"
@@ -213,11 +213,11 @@ def generate_conclusion_html(pred: Dict[str, Any]) -> str:
 
             "<div style='display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;'>"
             "<div style='background: #fecaca; padding: 1rem; border-radius: 8px; border-left: 3px solid #ef4444;'>"
-            "<div style='font-size: 0.9rem; font-weight: 600; color: #991b1b; margin-bottom: 0.5rem;'>⚠️ 安全建议</div>"
+            "<div style='font-size: 0.9rem; font-weight: 600; color: #991b1b; margin-bottom: 0.5rem;'>注意 安全建议</div>"
             "<div style='font-size: 0.85rem; color: #7f1d1d;'>立即停止访问，使用安全工具扫描系统</div>"
             "</div>"
             "<div style='background: #fee2e2; padding: 1rem; border-radius: 8px; border-left: 3px solid #fca5a5;'>"
-            "<div style='font-size: 0.9rem; font-weight: 600; color: #991b1b; margin-bottom: 0.5rem;'>🔒 推荐行动</div>"
+            "<div style='font-size: 0.9rem; font-weight: 600; color: #991b1b; margin-bottom: 0.5rem;'>保护 推荐行动</div>"
             "<div style='font-size: 0.85rem; color: #7f1d1d;'>举报该网站，修改密码并监控账户</div>"
             "</div>"
             "</div>"
@@ -227,11 +227,11 @@ def generate_conclusion_html(pred: Dict[str, Any]) -> str:
         return (
             "<div class='result-section' style='background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 4px solid #22c55e; position: relative;'>"
             "<div style='position: absolute; top: 1rem; right: 1rem; background: #22c55e; color: white; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600;'>SAFE</div>"
-            f"<div style='font-size: 1.5rem; font-weight: 700; color: #166534; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;'>✅ 检测为良性网站</div>"
+            f"<div style='font-size: 1.5rem; font-weight: 700; color: #166534; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;'>安全 检测为良性网站</div>"
             f"<div style='color: #14532d; font-size: 1.1rem; margin-bottom: 1rem;'>风险等级: <span style='font-weight: 600;'>{risk_level}</span> ({format_probability(final_prob)})</div>"
 
             "<div style='margin: 1rem 0;'>"
-            f"<div style='font-size: 1rem; font-weight: 600; color: #166534; margin-bottom: 0.75rem;'>📊 模型分析</div>"
+            f"<div style='font-size: 1rem; font-weight: 600; color: #166534; margin-bottom: 0.75rem;'>统计 模型分析</div>"
             f"{generate_progress_bar(url_prob, '#22c55e', 'URL模型')}"
             f"{generate_progress_bar(fusion_prob if fusion_prob is not None else 0, '#22c55e', 'FusionDNN模型')}"
             f"{generate_progress_bar(final_prob, '#16a34a', '综合风险')}"
@@ -239,11 +239,11 @@ def generate_conclusion_html(pred: Dict[str, Any]) -> str:
 
             "<div style='display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;'>"
             "<div style='background: #bbf7d0; padding: 1rem; border-radius: 8px; border-left: 3px solid #22c55e;'>"
-            "<div style='font-size: 0.9rem; font-weight: 600; color: #166534; margin-bottom: 0.5rem;'>🛡️ 安全状态</div>"
+            "<div style='font-size: 0.9rem; font-weight: 600; color: #166534; margin-bottom: 0.5rem;'>防护 安全状态</div>"
             "<div style='font-size: 0.85rem; color: #14532d;'>网站技术特征正常，无明显风险</div>"
             "</div>"
             "<div style='background: #dcfce7; padding: 1rem; border-radius: 8px; border-left: 3px solid #86efac;'>"
-            "<div style='font-size: 0.9rem; font-weight: 600; color: #166534; margin-bottom: 0.5rem;'>💡 建议措施</div>"
+            "<div style='font-size: 0.9rem; font-weight: 600; color: #166534; margin-bottom: 0.5rem;'>提示 建议措施</div>"
             "<div style='font-size: 0.85rem; color: #14532d;'>保持警惕，启用双因子认证</div>"
             "</div>"
             "</div>"
@@ -270,20 +270,20 @@ def build_detail_summary(details: Dict[str, Any] | None) -> str:
     lines = ["### 推理细节"]
     decision = details.get("decision")
     if decision:
-        lines.append(f"- **融合策略**：{decision}")
+        lines.append(f"- **融合策略**:{decision}")
 
     weights = details.get("fusion_weights", {})
     if weights:
-        lines.append("- **权重分配：**")
-        lines.append(f"  - URL 模型：{weights.get('url', 0) * 100:.1f}%")
-        lines.append(f"  - FusionDNN：{weights.get('fusion', 0) * 100:.1f}%")
+        lines.append("- **权重分配:**")
+        lines.append(f"  - URL 模型:{weights.get('url', 0) * 100:.1f}%")
+        lines.append(f"  - FusionDNN:{weights.get('fusion', 0) * 100:.1f}%")
 
     thresholds = details.get("thresholds", {})
     if thresholds:
-        lines.append("- **判定阈值：**")
+        lines.append("- **判定阈值:**")
         lines.extend(
             [
-                f"  - {key}：{value:.2f}" if isinstance(value, (int, float)) else f"  - {key}：{value}"
+                f"  - {key}:{value:.2f}" if isinstance(value, (int, float)) else f"  - {key}:{value}"
                 for key, value in thresholds.items()
             ]
         )
@@ -301,9 +301,9 @@ def build_detail_summary(details: Dict[str, Any] | None) -> str:
             contributions.append((magnitude, label, float(val)))
         if contributions:
             contributions.sort(reverse=True)
-            lines.append("- **关键指纹特征：**")
+            lines.append("- **关键指纹特征:**")
             for _, label, value in contributions[:5]:
-                lines.append(f"  - {label}：{value:.2f}")
+                lines.append(f"  - {label}:{value:.2f}")
     return "\n".join(lines)
 
 
@@ -312,25 +312,25 @@ def create_feature_popup(features: Dict[str, Any]) -> str:
     url_feats = features.get("url_feats", {})
     if url_feats:
         popup_content.append("### 🔗 URL 特征")
-        popup_content.append(f"- **总长度**：{url_feats.get('url_len', 0)}")
-        popup_content.append(f"- **域名长度**：{url_feats.get('host_len', 0)}")
-        popup_content.append(f"- **路径长度**：{url_feats.get('path_len', 0)}")
-        popup_content.append(f"- **数字字符数**：{url_feats.get('num_digits', 0)}")
-        popup_content.append(f"- **特殊字符数**：{url_feats.get('num_specials', 0)}")
-        popup_content.append(f"- **子域名深度**：{url_feats.get('subdomain_depth', 0)}")
-        popup_content.append(f"- **是否包含 IP**：{'是' if url_feats.get('has_ip') else '否'}")
-        popup_content.append(f"- **协议**：{'HTTPS' if url_feats.get('scheme_https') else 'HTTP'}")
+        popup_content.append(f"- **总长度**:{url_feats.get('url_len', 0)}")
+        popup_content.append(f"- **域名长度**:{url_feats.get('host_len', 0)}")
+        popup_content.append(f"- **路径长度**:{url_feats.get('path_len', 0)}")
+        popup_content.append(f"- **数字字符数**:{url_feats.get('num_digits', 0)}")
+        popup_content.append(f"- **特殊字符数**:{url_feats.get('num_specials', 0)}")
+        popup_content.append(f"- **子域名深度**:{url_feats.get('subdomain_depth', 0)}")
+        popup_content.append(f"- **是否包含 IP**:{'是' if url_feats.get('has_ip') else '否'}")
+        popup_content.append(f"- **协议**:{'HTTPS' if url_feats.get('scheme_https') else 'HTTP'}")
 
     html_feats = features.get("html_feats", {})
     if html_feats:
         popup_content.append("\n### 📄 HTML 特征")
-        popup_content.append(f"- **标题长度**：{html_feats.get('title_len', 0)}")
-        popup_content.append(f"- **元标签数**：{html_feats.get('num_meta', 0)}")
-        popup_content.append(f"- **链接数**：{html_feats.get('num_links', 0)}")
-        popup_content.append(f"- **脚本数**：{html_feats.get('num_scripts', 0)}")
-        popup_content.append(f"- **表单数**：{html_feats.get('num_forms', 0)}")
-        popup_content.append(f"- **是否有密码输入**：{'是' if html_feats.get('has_password_input') else '否'}")
-        popup_content.append(f"- **可疑脚本**：{'是' if html_feats.get('suspicious_js_inline') else '否'}")
+        popup_content.append(f"- **标题长度**:{html_feats.get('title_len', 0)}")
+        popup_content.append(f"- **元标签数**:{html_feats.get('num_meta', 0)}")
+        popup_content.append(f"- **链接数**:{html_feats.get('num_links', 0)}")
+        popup_content.append(f"- **脚本数**:{html_feats.get('num_scripts', 0)}")
+        popup_content.append(f"- **表单数**:{html_feats.get('num_forms', 0)}")
+        popup_content.append(f"- **是否有密码输入**:{'是' if html_feats.get('has_password_input') else '否'}")
+        popup_content.append(f"- **可疑脚本**:{'是' if html_feats.get('suspicious_js_inline') else '否'}")
 
     status_code = features.get("status_code")
     content_type = features.get("content_type")
@@ -338,11 +338,11 @@ def create_feature_popup(features: Dict[str, Any]) -> str:
     if status_code or content_type or bytes_size:
         popup_content.append("\n### 🌐 HTTP 响应特征")
         if status_code:
-            popup_content.append(f"- **状态码**：{status_code}")
+            popup_content.append(f"- **状态码**:{status_code}")
         if content_type:
-            popup_content.append(f"- **内容类型**：{content_type}")
+            popup_content.append(f"- **内容类型**:{content_type}")
         if bytes_size:
-            popup_content.append(f"- **响应大小**：{bytes_size} bytes")
+            popup_content.append(f"- **响应大小**:{bytes_size} bytes")
 
     return "\n".join(popup_content) if popup_content else "### 特征摘要\n- 暂无特征信息。"
 
@@ -695,15 +695,15 @@ def generate_url_info_html(url: str) -> str:
     risk_score = risk_analysis.get('risk_score', 0)
     if risk_score > 0.7:
         risk_color = '#ef4444'
-        risk_emoji = '🚨'
+        risk_emoji = '警告'
         risk_text = '高风险'
     elif risk_score > 0.4:
         risk_color = '#f59e0b'
-        risk_emoji = '⚠️'
+        risk_emoji = '注意'
         risk_text = '中风险'
     else:
         risk_color = '#22c55e'
-        risk_emoji = '✅'
+        risk_emoji = '安全'
         risk_text = '低风险'
 
     html_parts = [
@@ -747,7 +747,7 @@ def generate_url_info_html(url: str) -> str:
     if risk_analysis.get('warnings'):
         html_parts.append("""
             <div style='background: rgba(239, 68, 68, 0.1); padding: 0.75rem; border-radius: 8px; margin-bottom: 0.75rem;'>
-                <div style='font-size: 0.85rem; font-weight: 600; color: #dc2626; margin-bottom: 0.25rem;'>⚠️ 风险提示</div>
+                <div style='font-size: 0.85rem; font-weight: 600; color: #dc2626; margin-bottom: 0.25rem;'>注意 风险提示</div>
         """)
         for warning in risk_analysis['warnings'][:3]:
             html_parts.append(f"<div style='font-size: 0.8rem; color: #991b1b;'>• {warning}</div>")
@@ -812,15 +812,15 @@ def generate_risk_timeline_html(history: List[Dict[str, Any]]) -> str:
         # 确定风险等级和颜色
         if prob_value >= 70:
             risk_color = '#ef4444'
-            risk_emoji = '🚨'
+            risk_emoji = '警告'
             risk_bg = 'rgba(239, 68, 68, 0.1)'
         elif prob_value >= 40:
             risk_color = '#f59e0b'
-            risk_emoji = '⚠️'
+            risk_emoji = '注意'
             risk_bg = 'rgba(245, 158, 11, 0.1)'
         else:
             risk_color = '#22c55e'
-            risk_emoji = '✅'
+            risk_emoji = '安全'
             risk_bg = 'rgba(34, 197, 94, 0.1)'
 
         # 时间点样式
@@ -867,14 +867,15 @@ def generate_risk_timeline_html(history: List[Dict[str, Any]]) -> str:
     timeline_html += """
                 </div>
             </div>
-
-            {f"""<div style='text-align: center; margin-top: 1rem; padding: 0.75rem; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border-left: 4px solid #3b82f6;'>
-                <div style='font-size: 0.85rem; color: #1e40af; font-weight: 500;'>
-                    💡 提示：点击历史记录可以重新分析对应URL
-                </div>
-            </div>""" if len(history) > 0 else ""}
         </div>
     """
+
+    if len(history) > 0:
+        timeline_html += """<div style='text-align: center; margin-top: 1rem; padding: 0.75rem; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border-left: 4px solid #3b82f6;'>
+                <div style='font-size: 0.85rem; color: #1e40af; font-weight: 500;'>
+                    提示: 点击历史记录可以重新分析对应URL
+                </div>
+            </div>"""
 
     return timeline_html
 
@@ -931,13 +932,13 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
     if isinstance(result, Exception):
         conclusion = gr.HTML(
             "<div class='result-section' style='background: linear-gradient(135deg, #fef2f2, #fee2e2); border-left: 4px solid #ef4444;'>"
-            f"<div style='font-size: 1.3rem; font-weight: 600; color: #dc2626; margin-bottom: 0.5rem;'>❌ 检测失败</div>"
+            f"<div style='font-size: 1.3rem; font-weight: 600; color: #dc2626; margin-bottom: 0.5rem;'>错误 检测失败</div>"
             f"<div style='color: #7f1d1d;'>{result}</div>"
             "</div>"
         )
         status_html = (
             "<div class='status-indicator risk-danger'>"
-            "<div style='font-size: 3rem; margin-bottom: 0.5rem;'>⚠️</div>"
+            "<div style='font-size: 3rem; margin-bottom: 0.5rem;'>注意</div>"
             "<div style='font-size: 1.1rem; font-weight: 600;'>检测失败</div>"
             "<div style='font-size: 0.9rem; opacity: 0.8;'>请稍后重试或检查网络</div>"
             "</div>"
@@ -945,7 +946,7 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
         prob_summary = gr.HTML(
             "<div class='feature-card'>"
             "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
-            "<span style='font-size: 1.3rem;'>📊</span>"
+            "<span style='font-size: 1.3rem;'>统计</span>"
             "<div style='font-size: 1.1rem; font-weight: 600; color: #ef4444;'>概率拆解</div>"
             "</div>"
             "<div style='color: #ef4444;'>检测失败，暂无概率信息</div>"
@@ -1025,7 +1026,7 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
     risk_level, risk_class = get_risk_level(final_prob)
 
     status_class = f"risk-{risk_class}"
-    status_emoji = "🚨" if pred.get('label', 0) == 1 else "✅"
+    status_emoji = "警告" if pred.get('label', 0) == 1 else "安全"
     status_label = "钓鱼网站" if pred.get('label', 0) == 1 else "良性网站"
 
     status_html = (
@@ -1094,7 +1095,7 @@ def build_interface():
 
     .gradio-container {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'SF Pro Display', sans-serif;
-        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #cbd5e1 100%);
+        background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 25%, #f0f9ff 50%, #e0f2fe 75%, #faf5ff 100%);
         min-height: 100vh;
         position: relative;
         overflow-x: hidden;
@@ -1108,8 +1109,9 @@ def build_interface():
         width: 100%;
         height: 100%;
         background:
-            radial-gradient(circle at 80% 20%, rgba(120, 119, 198, 0.03) 0%, transparent 50%),
-            radial-gradient(circle at 20% 80%, rgba(236, 72, 153, 0.03) 0%, transparent 50%);
+            radial-gradient(circle at 80% 20%, rgba(16, 185, 129, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 20% 80%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
+            radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.04) 0%, transparent 50%);
         pointer-events: none;
         z-index: 0;
     }
@@ -1247,7 +1249,7 @@ def build_interface():
     }
 
     .risk-danger::after {
-        content: '⚠️';
+        content: '注意';
         position: absolute;
         top: 10px;
         right: 10px;
@@ -2164,9 +2166,11 @@ def build_interface():
     with gr.Blocks(
         title="PhishGuard v5 - Advanced Phishing Detection",
         theme=gr.themes.Soft(
-            primary_hue="blue",
-            secondary_hue="slate",
-            neutral_hue="slate",
+            primary_hue="emerald",
+            secondary_hue="blue",
+            neutral_hue="gray",
+            spacing_size="lg",
+            radius_size="md",
         ),
         css=custom_css,
     ) as demo:
@@ -2174,7 +2178,7 @@ def build_interface():
         gr.HTML(
             """
             <div class="gradient-bg">
-                <h1 style="margin: 0; font-size: 2.5rem; font-weight: 700;">🛡️ PhishGuard v5</h1>
+                <h1 style="margin: 0; font-size: 2.5rem; font-weight: 700;">防护 PhishGuard v5</h1>
                 <p style="margin: 0.5rem 0 0 0; font-size: 1.2rem; opacity: 0.9;">Advanced Phishing Detection System</p>
                 <div style="margin-top: 1rem; display: flex; gap: 2rem; flex-wrap: wrap;">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -2192,7 +2196,7 @@ def build_interface():
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <span style="font-size: 1.5rem;">📊</span>
+                        <span style="font-size: 1.5rem;">统计</span>
                         <div>
                             <div style="font-weight: 600;">全链路诊断</div>
                             <div style="font-size: 0.9rem; opacity: 0.8;">概率拆解+推理详情</div>
@@ -2241,7 +2245,7 @@ def build_interface():
                                     elem_classes="micro-interact"
                                 )
                                 dark_mode_btn = gr.Button(
-                                    "🌙 深色模式",
+                                    "深色 深色模式",
                                     variant="secondary",
                                     size="sm",
                                     elem_classes="micro-interact"
@@ -2276,7 +2280,7 @@ def build_interface():
                         probability_summary = gr.HTML(
                             "<div class='feature-card'>"
                             "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
-                            "<span style='font-size: 1.5rem;'>📊</span>"
+                            "<span style='font-size: 1.5rem;'>统计</span>"
                             "<div style='font-size: 1.2rem; font-weight: 600;'>概率拆解</div>"
                             "</div>"
                             "<div style='color: #6b7280; font-size: 0.95rem;'>等待检测...</div>"
@@ -2293,7 +2297,7 @@ def build_interface():
                             "</div>"
                         )
 
-                with gr.Accordion("📊 详细分析结果", open=False):
+                with gr.Accordion("统计 详细分析结果", open=False):
                     with gr.Tabs():
                         with gr.TabItem("🎯 核心数据"):
                             with gr.Row():
@@ -2316,7 +2320,7 @@ def build_interface():
                                     show_copy_button=True
                                 )
                                 status_code = gr.Textbox(
-                                    label="📊 状态码",
+                                    label="统计 状态码",
                                     interactive=False
                                 )
                                 content_type = gr.Textbox(
@@ -2376,7 +2380,7 @@ def build_interface():
                                 show_download_button=True
                             )
 
-                with gr.Accordion("📊 实时统计面板", open=True):
+                with gr.Accordion("统计 实时统计面板", open=True):
                     with gr.Row():
                         with gr.Column(scale=2):
                             stats_display = gr.HTML(
@@ -2388,7 +2392,7 @@ def build_interface():
                                             <div style="font-size: 1.3rem; font-weight: 600;">实时统计</div>
                                         </div>
                                         <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 12px;">
-                                            <span style="font-size: 1rem; color: #3b82f6; font-weight: 500;">📊</span>
+                                            <span style="font-size: 1rem; color: #3b82f6; font-weight: 500;">统计</span>
                                             <span style="font-size: 0.9rem; color: #1e40af;">实时更新</span>
                                         </div>
                                     </div>
@@ -2481,15 +2485,15 @@ def build_interface():
                                 )
                                 with gr.Row():
                                     filter_safe = gr.Checkbox(
-                                        label="✅ 安全",
+                                        label="安全 安全",
                                         value=True
                                     )
                                     filter_risky = gr.Checkbox(
-                                        label="⚠️ 风险",
+                                        label="注意 风险",
                                         value=True
                                     )
                                     filter_danger = gr.Checkbox(
-                                        label="🚨 危险",
+                                        label="警告 危险",
                                         value=True
                                     )
 
@@ -2519,8 +2523,7 @@ def build_interface():
                                 datatype=["str", "str", "str", "str", "str"],
                                 value=[],
                                 interactive=False,
-                                wrap=True,
-                                height=400
+                                wrap=True
                             )
 
                     # 风险评估时间线
@@ -2563,7 +2566,7 @@ def build_interface():
                             """
                             <div class='feature-card' style='height: 100%;'>
                                 <div style='margin-bottom: 1rem;'>
-                                    <div style='font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;'>⚙️ 检测设置</div>
+                                    <div style='font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;'>设置 检测设置</div>
                                 </div>
                                 <div style='margin-bottom: 1rem;'>
                                     <div style='color: #6b7280; font-size: 0.9rem; margin-bottom: 0.5rem;'>批量检测选项</div>
@@ -2586,7 +2589,7 @@ def build_interface():
                         gr.HTML(
                             """
                             <div style='margin-top: 1rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #3b82f6;'>
-                                <div style='font-size: 0.9rem; color: #1e40af; font-weight: 600;'>💡 提示</div>
+                                <div style='font-size: 0.9rem; color: #1e40af; font-weight: 600;'>提示 提示</div>
                                 <div style='font-size: 0.85rem; color: #1e3a8a; margin-top: 0.25rem;'>批量检测会消耗更多时间和资源，建议一次检测不超过50个URL</div>
                             </div>
                             """
@@ -2636,7 +2639,7 @@ def build_interface():
                             """
                             <div class='feature-card' style='border-left: 4px solid #ef4444;'>
                                 <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>
-                                    <span style='font-size: 1.5rem;'>🚨</span>
+                                    <span style='font-size: 1.5rem;'>警告</span>
                                     <div style='font-size: 1.2rem; font-weight: 600; color: #dc2626;'>钓鱼网站样例</div>
                                 </div>
                                 <div style='color: #6b7280; font-size: 0.9rem;'>真实的钓鱼网站，用于测试检测准确性</div>
@@ -2650,7 +2653,7 @@ def build_interface():
                             interactive=False,
                         )
                         load_phishing_btn = gr.Button(
-                            "🚨 加载钓鱼网站样例",
+                            "警告 加载钓鱼网站样例",
                             variant="stop",
                             size="sm"
                         )
@@ -2660,7 +2663,7 @@ def build_interface():
                             """
                             <div class='feature-card' style='border-left: 4px solid #22c55e;'>
                                 <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>
-                                    <span style='font-size: 1.5rem;'>✅</span>
+                                    <span style='font-size: 1.5rem;'>安全</span>
                                     <div style='font-size: 1.2rem; font-weight: 600; color: #16a34a;'>良性网站样例</div>
                                 </div>
                                 <div style='color: #6b7280; font-size: 0.9rem;'>知名安全网站，用于测试误报率</div>
@@ -2674,7 +2677,7 @@ def build_interface():
                             interactive=False,
                         )
                         load_benign_btn = gr.Button(
-                            "✅ 加载良性网站样例",
+                            "安全 加载良性网站样例",
                             variant="primary",
                             size="sm"
                         )
@@ -2729,11 +2732,11 @@ def build_interface():
                             "</div>"
                         )
 
-            with gr.TabItem("ℹ️ 系统信息"):
+            with gr.TabItem("信息 系统信息"):
                 gr.HTML(
                     """
                     <div class='gradient-bg' style='background: linear-gradient(135deg, #6366f1, #8b5cf6);'>
-                        <h3 style='margin: 0 0 1rem 0; font-size: 1.5rem;'>ℹ️ 系统信息与控制中心</h3>
+                        <h3 style='margin: 0 0 1rem 0; font-size: 1.5rem;'>信息 系统信息与控制中心</h3>
                         <p style='margin: 0; opacity: 0.9;'>模型版本、系统配置与高级功能</p>
                         <div style='margin-top: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;'>
                             <div style='display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(255,255,255,0.2); border-radius: 20px; backdrop-filter: blur(10px);'>
@@ -2741,11 +2744,11 @@ def build_interface():
                                 <span style='font-size: 0.9rem;'>PWA就绪</span>
                             </div>
                             <div style='display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(255,255,255,0.2); border-radius: 20px; backdrop-filter: blur(10px);'>
-                                <span style='font-size: 1rem;'>🌙</span>
+                                <span style='font-size: 1rem;'>深色</span>
                                 <span style='font-size: 0.9rem;'>深色模式</span>
                             </div>
                             <div style='display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(255,255,255,0.2); border-radius: 20px; backdrop-filter: blur(10px);'>
-                                <span style='font-size: 1rem;'>⌨️</span>
+                                <span style='font-size: 1rem;'>键盘</span>
                                 <span style='font-size: 0.9rem;'>快捷键</span>
                             </div>
                         </div>
@@ -2786,12 +2789,12 @@ def build_interface():
                             """
                         )
 
-                    with gr.TabItem("⚙️ 推理配置"):
+                    with gr.TabItem("设置 推理配置"):
                         gr.HTML(
                             """
                             <div class='feature-card'>
                                 <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;'>
-                                    <span style='font-size: 1.5rem;'>⚙️</span>
+                                    <span style='font-size: 1.5rem;'>设置</span>
                                     <div style='font-size: 1.3rem; font-weight: 600;'>推理阈值配置</div>
                                 </div>
 
@@ -2872,11 +2875,11 @@ def build_interface():
 
                                 <div style='background: linear-gradient(135deg, #dcfce7, #bbf7d0); padding: 1.5rem; border-radius: 16px; margin: 1rem 0; border: 1px solid #86efac;'>
                                     <div style='font-weight: 600; color: #166534; margin-bottom: 1rem; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;'>
-                                        <span>💡</span> 高级功能与最佳实践
+                                        <span>提示</span> 高级功能与最佳实践
                                     </div>
                                     <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;'>
                                         <div style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px;'>
-                                            <div style='font-weight: 600; color: #15803d; margin-bottom: 0.5rem; font-size: 0.95rem;'>⌨️ 快捷键</div>
+                                            <div style='font-weight: 600; color: #15803d; margin-bottom: 0.5rem; font-size: 0.95rem;'>键盘 快捷键</div>
                                             <div style='color: #166534; font-size: 0.85rem; line-height: 1.5;'>
                                                 Ctrl+Enter: 开始检测<br>
                                                 Ctrl+K: 聚焦输入框<br>
@@ -2892,7 +2895,7 @@ def build_interface():
                                             </div>
                                         </div>
                                         <div style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px;'>
-                                            <div style='font-weight: 600; color: #15803d; margin-bottom: 0.5rem; font-size: 0.95rem;'>📊 数据分析</div>
+                                            <div style='font-weight: 600; color: #15803d; margin-bottom: 0.5rem; font-size: 0.95rem;'>统计 数据分析</div>
                                             <div style='color: #166534; font-size: 0.85rem; line-height: 1.5;'>
                                                 实时统计面板<br>
                                                 风险分布图表<br>
@@ -2900,7 +2903,7 @@ def build_interface():
                                             </div>
                                         </div>
                                         <div style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px;'>
-                                            <div style='font-weight: 600; color: #15803d; margin-bottom: 0.5rem; font-size: 0.95rem;'>🌙 用户体验</div>
+                                            <div style='font-weight: 600; color: #15803d; margin-bottom: 0.5rem; font-size: 0.95rem;'>深色 用户体验</div>
                                             <div style='color: #166534; font-size: 0.85rem; line-height: 1.5;'>
                                                 深色模式支持<br>
                                                 响应式设计<br>
@@ -2972,7 +2975,7 @@ def build_interface():
 
                                 <div style='background: linear-gradient(135deg, #f0f9ff, #e0f2fe); padding: 1.5rem; border-radius: 16px; margin: 1rem 0; border: 1px solid #bae6fd;'>
                                     <div style='font-weight: 600; color: #0c4a6e; margin-bottom: 1rem; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;'>
-                                        <span>🛠️</span> 技术特性
+                                        <span>工具</span> 技术特性
                                     </div>
                                     <div style='background: rgba(255,255,255,0.8); padding: 1rem; border-radius: 8px;'>
                                         <div style='font-family: monospace; font-size: 0.85rem; color: #0c4a6e; line-height: 1.6;'>
@@ -3156,10 +3159,8 @@ def build_interface():
             if not suggestions:
                 return gr.update(visible=False)
 
-            suggestions_html = ""
-            <div class='feature-card glass-effect' style='padding: 1rem; margin-top: 0.5rem;'>
-                <div style='font-size: 0.9rem; font-weight: 600; color: #374151; margin-bottom: 0.5rem;'>💡 智能建议</div>
-            ""
+            suggestions_html = """<div class='feature-card glass-effect' style='padding: 1rem; margin-top: 0.5rem;'>
+                <div style='font-size: 0.9rem; font-weight: 600; color: #374151; margin-bottom: 0.5rem;'>提示 智能建议</div>"""
 
             for i, suggestion in enumerate(suggestions):
                 suggestions_html += f"""
@@ -3194,7 +3195,7 @@ def build_interface():
                             <div style="font-size: 1.3rem; font-weight: 600;">实时统计</div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 12px;">
-                            <span style="font-size: 1rem; color: #3b82f6; font-weight: 500;">📊</span>
+                            <span style="font-size: 1rem; color: #3b82f6; font-weight: 500;">统计</span>
                             <span style="font-size: 0.9rem; color: #1e40af;">实时更新</span>
                         </div>
                     </div>
@@ -3269,7 +3270,7 @@ def build_interface():
             # 输入验证
             if not urls or not urls.strip():
                 return (
-                    "❌ 请输入要检测的URL列表",
+                    "错误 请输入要检测的URL列表",
                     gr.update(value=[]),
                     gr.update(value=None, visible=False),
                 )
@@ -3278,7 +3279,7 @@ def build_interface():
             url_lines = [line.strip() for line in urls.splitlines() if line.strip()]
             if not url_lines:
                 return (
-                    "❌ 未找到有效的URL",
+                    "错误 未找到有效的URL",
                     gr.update(value=[]),
                     gr.update(value=None, visible=False),
                 )
@@ -3287,7 +3288,7 @@ def build_interface():
                 results = asyncio.run(scan_multiple(urls, screenshot))
                 rows, csv_path, stats = build_batch_results(results)
                 summary = (
-                    f"✅ 共检测 {stats['total']} 条 URL，其中钓鱼 {stats['phish']} 条"
+                    f"安全 共检测 {stats['total']} 条 URL，其中钓鱼 {stats['phish']} 条"
                     + (f"，失败 {stats['errors']} 条" if stats['errors'] else "")
                 )
                 return (
@@ -3298,13 +3299,13 @@ def build_interface():
             except ValueError as ve:
                 # 处理URL格式错误
                 return (
-                    f"❌ URL格式错误：{ve}",
+                    f"错误 URL格式错误:{ve}",
                     gr.update(value=[]),
                     gr.update(value=None, visible=False),
                 )
             except Exception as exc:
                 return (
-                    f"❌ 批量检测失败：{exc}",
+                    f"错误 批量检测失败:{exc}",
                     gr.update(value=[]),
                     gr.update(value=None, visible=False),
                 )
@@ -3484,7 +3485,7 @@ def build_interface():
                 // 更新按钮文本
                 const btn = document.querySelector('button[aria-label*="深色模式"]');
                 if (btn) {
-                    btn.innerHTML = document.body.classList.contains('dark-mode') ? '☀️ 浅色模式' : '🌙 深色模式';
+                    btn.innerHTML = document.body.classList.contains('dark-mode') ? '浅色 浅色模式' : '深色 深色模式';
                 }
             }
             """
@@ -3502,7 +3503,7 @@ def build_interface():
                     document.body.classList.add('dark-mode');
                     const btn = document.querySelector('button[aria-label*="深色模式"]');
                     if (btn) {
-                        btn.innerHTML = '☀️ 浅色模式';
+                        btn.innerHTML = '浅色 浅色模式';
                     }
                 }
 

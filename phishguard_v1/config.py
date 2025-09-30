@@ -3,8 +3,8 @@ from pydantic import Field
 
 class Settings(BaseSettings):
     # 模型 & 抓取配置
-    url_model_id: str = Field(default="artifacts/url_model", description="本地URL模型路径")
-    device: str = Field(default="cuda", description="cuda 或 cpu")
+    url_model_id: str = Field(default="imanoop7/bert-phishing-detector", description="URL模型ID")
+    device: str = Field(default="cpu", description="cuda 或 cpu")
     url_phish_threshold: float = Field(default=0.8, description="URL模型判定钓鱼的概率阈值")
     url_phish_min_threshold: float = Field(default=0.65, description="URL模型触发融合确认的最低钓鱼概率")
     fusion_phish_threshold: float = Field(default=0.6, description="FusionDNN判定钓鱼的概率阈值")
