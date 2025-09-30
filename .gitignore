@@ -58,12 +58,11 @@ validated_github_data/
 test_results/
 venv/
 
-# Large parquet files (>5MB)
-**/*batch*.parquet
-**/*dataset*.parquet
-**/data_*/train.parquet
-**/data_*/test.parquet
-**/data_*/val.parquet
+# All parquet files (keep only small evaluation files)
+*.parquet
+!artifacts/eval_ui_predictions.parquet
+!artifacts/*_labeled_*.parquet
+!artifacts/*_pool_*.parquet
 
 # Large CSV files (>1MB)
 **/*batch*.csv
