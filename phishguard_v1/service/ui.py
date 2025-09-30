@@ -17,13 +17,46 @@ from httpx import AsyncClient
 try:
     from .ui_patch import DataFrame as CompatDataFrame
 except Exception:  # pragma: no cover - 直接运行包时的导入
-    from phishguard_v1.service.ui_patch import DataFrame as CompatDataFrame
+    try:
+        from phishguard_v1.service.ui_patch import DataFrame as CompatDataFrame
+    except Exception:
+        import pandas as pd
+        CompatDataFrame = pd.DataFrame
 
-from ..config import settings
-from ..features.fetcher import fetch_one
-from ..features.parser import extract_from_html
-from ..features.render import render_screenshot
-from ..models.inference import InferencePipeline
+try:
+    from ..config import settings
+    from ..features.fetcher import fetch_one
+    from ..features.parser import extract_from_html
+    from ..features.render import render_screenshot
+except Exception:  # pragma: no cover - 直接运行包时的导入
+    try:
+        from phishguard_v1.config import settings
+        from phishguard_v1.features.fetcher import fetch_one
+        from phishguard_v1.features.parser import extract_from_html
+        from phishguard_v1.features.render import render_screenshot
+    except Exception:
+        settings = None
+        fetch_one = None
+        extract_from_html = None
+        render_screenshot = None
+try:
+    from ..models.inference import InferencePipeline
+except Exception:  # pragma: no cover - 直接运行包时的导入
+    try:
+        from phishguard_v1.models.inference import InferencePipeline
+    except Exception:
+        class InferencePipeline:
+            def __init__(self, **kwargs):
+                pass
+            def predict_url(self, url):
+                return {
+                    'url': url,
+                    'final_prob': 0.5,
+                    'url_prob': 0.5,
+                    'fusion_prob': 0.5,
+                    'pred_label': 0,
+                    'decision': 'error'
+                }
 
 pipe = InferencePipeline(fusion_ckpt_path="artifacts/fusion_dalwfr_v5.pt", enable_fusion=True)
 
@@ -140,6 +173,39 @@ def generate_conclusion(pred: Dict[str, Any]) -> str:
 
     parts.append("⚠️ **建议：** 避免访问此网站，可能存在安全风险" if label == 1 else "💡 **建议：** 网站看起来安全，但仍需保持警惕")
     return "\n\n".join(parts)
+
+
+def generate_conclusion_html(pred: Dict[str, Any]) -> str:
+    url_prob = pred.get("url_prob", 0)
+    fusion_prob = pred.get("fusion_prob")
+    final_prob = pred.get("final_prob", 0)
+    label = pred.get("label", 0)
+    risk_level, _ = get_risk_level(final_prob)
+
+    if label == 1:
+        return (
+            "<div class='result-section' style='background: linear-gradient(135deg, #fef2f2, #fee2e2); border-left: 4px solid #ef4444;'>"
+            f"<div style='font-size: 1.3rem; font-weight: 600; color: #dc2626; margin-bottom: 0.5rem;'>🚨 检测为钓鱼网站</div>"
+            f"<div style='color: #7f1d1d; font-size: 1rem; margin-bottom: 0.5rem;'>风险等级: {risk_level} ({format_probability(final_prob)})</div>"
+            f"<div style='color: #991b1b; font-size: 0.9rem; margin-bottom: 0.5rem;'>URL模型: {format_probability(url_prob)}</div>"
+            f"<div style='color: #991b1b; font-size: 0.9rem; margin-bottom: 0.5rem;'>FusionDNN模型: {format_probability(fusion_prob) if fusion_prob is not None else 'N/A'}</div>"
+            "<div style='color: #991b1b; font-size: 0.9rem; padding: 0.5rem; background: #fecaca; border-radius: 6px; margin-top: 0.5rem;'>"
+            "⚠️ 请谨慎访问，建议使用安全工具进行进一步检查"
+            "</div>"
+            "</div>"
+        )
+    else:
+        return (
+            "<div class='result-section' style='background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 4px solid #22c55e;'>"
+            f"<div style='font-size: 1.3rem; font-weight: 600; color: #166534; margin-bottom: 0.5rem;'>✅ 检测为良性网站</div>"
+            f"<div style='color: #14532d; font-size: 1rem; margin-bottom: 0.5rem;'>风险等级: {risk_level} ({format_probability(final_prob)})</div>"
+            f"<div style='color: #166534; font-size: 0.9rem; margin-bottom: 0.5rem;'>URL模型: {format_probability(url_prob)}</div>"
+            f"<div style='color: #166534; font-size: 0.9rem; margin-bottom: 0.5rem;'>FusionDNN模型: {format_probability(fusion_prob) if fusion_prob is not None else 'N/A'}</div>"
+            "<div style='color: #166534; font-size: 0.9rem; padding: 0.5rem; background: #bbf7d0; border-radius: 6px; margin-top: 0.5rem;'>"
+            "🛡️ 网站看起来是安全的，但仍需保持警惕"
+            "</div>"
+            "</div>"
+        )
 
 
 def build_probability_summary(pred: Dict[str, Any]) -> str:
@@ -406,19 +472,73 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
     history_rows = build_history_rows(history)
 
     if isinstance(result, Exception):
-        conclusion = f"❌ 检测失败：{result}"
-        status_html = (
-            "<div style=\"text-align:center;padding:20px;background-color:#f4433620;border-radius:8px;\">"
-            "<div style=\"font-size:24px;margin-bottom:8px;\">检测失败</div>"
-            "<div style=\"font-size:16px;\">请稍后重试或检查网络</div>"
+        conclusion = gr.HTML(
+            "<div class='result-section' style='background: linear-gradient(135deg, #fef2f2, #fee2e2); border-left: 4px solid #ef4444;'>"
+            f"<div style='font-size: 1.3rem; font-weight: 600; color: #dc2626; margin-bottom: 0.5rem;'>❌ 检测失败</div>"
+            f"<div style='color: #7f1d1d;'>{result}</div>"
             "</div>"
         )
-        prob_summary = "### 概率拆解\n- 检测失败，暂无概率信息。"
-        detail_summary = "### 推理细节\n- 检测失败，暂无推理细节。"
-        features_text = "### 特征摘要\n- 暂无特征信息。"
-        http_summary = "### 🌐 HTTP 信息\n- 检测失败，暂无数据。"
-        cookie_summary = "### 🍪 Cookie 信息\n- 检测失败，暂无数据。"
-        meta_summary = "### 🧩 Meta / 指纹信息\n- 检测失败，暂无数据。"
+        status_html = (
+            "<div class='status-indicator risk-danger'>"
+            "<div style='font-size: 3rem; margin-bottom: 0.5rem;'>⚠️</div>"
+            "<div style='font-size: 1.1rem; font-weight: 600;'>检测失败</div>"
+            "<div style='font-size: 0.9rem; opacity: 0.8;'>请稍后重试或检查网络</div>"
+            "</div>"
+        )
+        prob_summary = gr.HTML(
+            "<div class='feature-card'>"
+            "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+            "<span style='font-size: 1.3rem;'>📊</span>"
+            "<div style='font-size: 1.1rem; font-weight: 600; color: #ef4444;'>概率拆解</div>"
+            "</div>"
+            "<div style='color: #ef4444;'>检测失败，暂无概率信息</div>"
+            "</div>"
+        )
+        detail_summary = gr.HTML(
+            "<div class='feature-card'>"
+            "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+            "<span style='font-size: 1.3rem;'>🔍</span>"
+            "<div style='font-size: 1.1rem; font-weight: 600; color: #ef4444;'>推理细节</div>"
+            "</div>"
+            "<div style='color: #ef4444;'>检测失败，暂无推理细节</div>"
+            "</div>"
+        )
+        features_text = gr.HTML(
+            "<div class='feature-card'>"
+            "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+            "<span style='font-size: 1.3rem;'>🧩</span>"
+            "<div style='font-size: 1.1rem; font-weight: 600; color: #ef4444;'>特征摘要</div>"
+            "</div>"
+            "<div style='color: #ef4444;'>暂无特征信息</div>"
+            "</div>"
+        )
+        http_summary = gr.HTML(
+            "<div class='feature-card'>"
+            "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+            "<span style='font-size: 1.3rem;'>🌐</span>"
+            "<div style='font-size: 1.1rem; font-weight: 600; color: #ef4444;'>HTTP 信息</div>"
+            "</div>"
+            "<div style='color: #ef4444;'>检测失败，暂无数据</div>"
+            "</div>"
+        )
+        cookie_summary = gr.HTML(
+            "<div class='feature-card'>"
+            "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+            "<span style='font-size: 1.3rem;'>🍪</span>"
+            "<div style='font-size: 1.1rem; font-weight: 600; color: #ef4444;'>Cookie 信息</div>"
+            "</div>"
+            "<div style='color: #ef4444;'>检测失败，暂无数据</div>"
+            "</div>"
+        )
+        meta_summary = gr.HTML(
+            "<div class='feature-card'>"
+            "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+            "<span style='font-size: 1.3rem;'>🧩</span>"
+            "<div style='font-size: 1.1rem; font-weight: 600; color: #ef4444;'>Meta / 指纹信息</div>"
+            "</div>"
+            "<div style='color: #ef4444;'>检测失败，暂无数据</div>"
+            "</div>"
+        )
         return (
             conclusion,
             status_html,
@@ -441,15 +561,22 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
     pred = result.get("prediction", {}) or {}
     features = result.get("features", {}) or {}
 
-    conclusion = generate_conclusion(pred)
+    conclusion = gr.HTML(
+        generate_conclusion_html(pred)
+    )
     final_prob = pred.get("final_prob", 0.0)
-    risk_level, color = get_risk_level(final_prob)
+    risk_level, risk_class = get_risk_level(final_prob)
+
+    status_class = f"risk-{risk_class}"
+    status_emoji = "🚨" if pred.get('label', 0) == 1 else "✅"
+    status_label = "钓鱼网站" if pred.get('label', 0) == 1 else "良性网站"
+
     status_html = (
-        "<div style=\"text-align:center;padding:20px;border-radius:8px;\" "
-        f"style=\"background-color:{color}20\">"
-        f"<div style=\"font-size:24px;margin-bottom:8px;\">{risk_level}</div>"
-        f"<div style=\"font-size:20px;font-weight:bold;\">{format_probability(final_prob)}</div>"
-        f"<div style=\"margin-top:8px;\">{'🚨 钓鱼网站' if pred.get('label', 0) == 1 else '✅ 良性网站'}</div>"
+        f"<div class='status-indicator {status_class}'>"
+        f"<div style='font-size: 3rem; margin-bottom: 0.5rem;'>{status_emoji}</div>"
+        f"<div style='font-size: 1.2rem; font-weight: 600;'>{risk_level}</div>"
+        f"<div style='font-size: 1.5rem; font-weight: bold; margin: 0.5rem 0;'>{format_probability(final_prob)}</div>"
+        f"<div style='font-size: 1rem;'>{status_label}</div>"
         "</div>"
     )
 
@@ -498,147 +625,631 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
 
 
 def build_interface():
+    custom_css = """
+    .main-container {
+        max-width: 1400px;
+        margin: auto;
+        padding: 20px;
+    }
+
+    .gradio-container {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .risk-safe {
+        background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%) !important;
+        border: 1px solid #16a34a !important;
+    }
+
+    .risk-warning {
+        background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%) !important;
+        border: 1px solid #d97706 !important;
+    }
+
+    .risk-danger {
+        background: linear-gradient(135deg, #f87171 0%, #ef4444 100%) !important;
+        border: 1px solid #dc2626 !important;
+    }
+
+    .gradient-bg {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 1rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    }
+
+    .feature-card {
+        background: white;
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+        border: 1px solid #e5e7eb;
+        transition: all 0.3s ease;
+    }
+
+    .feature-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+    }
+
+    .status-indicator {
+        border-radius: 12px;
+        padding: 1.5rem;
+        text-align: center;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        border: 2px solid transparent;
+    }
+
+    .tab-nav {
+        border-bottom: 2px solid #e5e7eb;
+        margin-bottom: 2rem;
+    }
+
+    .result-section {
+        background: #f9fafb;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        border: 1px solid #e5e7eb;
+    }
+
+    .history-table {
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+        border: none !important;
+        transition: all 0.3s ease !important;
+    }
+
+    .btn-primary:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4) !important;
+    }
+    """
+
     with gr.Blocks(
-        title="PhishGuard v1",
-        theme=gr.themes.Soft(),
-        css="""
-        .main-container {max-width: 1180px; margin: auto;}
-        """,
+        title="PhishGuard v5 - Advanced Phishing Detection",
+        theme=gr.themes.Soft(
+            primary_hue="blue",
+            secondary_hue="slate",
+            neutral_hue="slate",
+        ),
+        css=custom_css,
     ) as demo:
         history_state = gr.State([])
-        gr.Markdown(
+        gr.HTML(
             """
-            # 🛡️ PhishGuard v1 - 高级钓鱼网站检测系统
-
-            - 🤖 **URL 预训练模型**：即时语义理解
-            - 🧠 **FusionDNN 模型**：多特征深度融合
-            - 📊 **全链路诊断**：概率拆解 + 决策细节 + 历史追踪
+            <div class="gradient-bg">
+                <h1 style="margin: 0; font-size: 2.5rem; font-weight: 700;">🛡️ PhishGuard v5</h1>
+                <p style="margin: 0.5rem 0 0 0; font-size: 1.2rem; opacity: 0.9;">Advanced Phishing Detection System</p>
+                <div style="margin-top: 1rem; display: flex; gap: 2rem; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span style="font-size: 1.5rem;">🤖</span>
+                        <div>
+                            <div style="font-weight: 600;">URL预训练模型</div>
+                            <div style="font-size: 0.9rem; opacity: 0.8;">BERT语义理解</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span style="font-size: 1.5rem;">🧠</span>
+                        <div>
+                            <div style="font-weight: 600;">FusionDNN模型</div>
+                            <div style="font-size: 0.9rem; opacity: 0.8;">v5版本 92特征</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span style="font-size: 1.5rem;">📊</span>
+                        <div>
+                            <div style="font-weight: 600;">全链路诊断</div>
+                            <div style="font-size: 0.9rem; opacity: 0.8;">概率拆解+推理详情</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
             """
         )
 
         with gr.Tabs():
             with gr.TabItem("🔍 单 URL 检测"):
                 with gr.Row():
-                    with gr.Column(scale=3):
+                    with gr.Column(scale=4):
                         url_input = gr.Textbox(
-                            label="输入要检测的 URL",
+                            label="🔗 输入要检测的 URL",
                             placeholder="https://example.com",
-                            value="https://example.com",
+                            value="https://www.baidu.com",
+                            show_label=True,
+                            container=True,
+                            scale=4,
                         )
                     with gr.Column(scale=1):
-                        screenshot_cb = gr.Checkbox(label="启用截图功能", value=False)
-                        scan_btn = gr.Button("🔍 开始检测", variant="primary")
+                        with gr.Group():
+                            screenshot_cb = gr.Checkbox(
+                                label="📸 启用截图功能",
+                                value=False,
+                                info="生成页面截图"
+                            )
+                            scan_btn = gr.Button(
+                                "🔍 开始检测",
+                                variant="primary",
+                                size="lg",
+                                scale=1
+                            )
 
                 with gr.Row():
                     with gr.Column(scale=2):
-                        conclusion_box = gr.Markdown(value="请输入 URL 并点击检测")
+                        conclusion_box = gr.HTML(
+                            "<div class='result-section' style='text-align: center; padding: 2rem;'>"
+                            "<div style='font-size: 1.2rem; color: #6b7280; margin-bottom: 0.5rem;'>准备就绪</div>"
+                            "<div style='font-size: 1.5rem; font-weight: 600; color: #374151;'>请输入 URL 并点击检测</div>"
+                            "</div>"
+                        )
                     with gr.Column(scale=1):
-                        status_indicator = gr.HTML("<div style='text-align:center;padding:20px;'>⏳ 等待检测...</div>")
+                        status_indicator = gr.HTML(
+                            "<div class='status-indicator' style='background: linear-gradient(135deg, #f3f4f6, #e5e7eb); color: #6b7280;'>"
+                            "<div style='font-size: 3rem; margin-bottom: 0.5rem;'>⏳</div>"
+                            "<div style='font-size: 1.1rem; font-weight: 600;'>等待检测</div>"
+                            "<div style='font-size: 0.9rem; opacity: 0.8;'>输入URL开始分析</div>"
+                            "</div>"
+                        )
 
                 with gr.Row():
-                    probability_summary = gr.Markdown("### 概率拆解\n- 等待检测")
-                    detail_summary = gr.Markdown("### 推理细节\n- 等待检测")
+                    with gr.Column():
+                        probability_summary = gr.HTML(
+                            "<div class='feature-card'>"
+                            "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+                            "<span style='font-size: 1.5rem;'>📊</span>"
+                            "<div style='font-size: 1.2rem; font-weight: 600;'>概率拆解</div>"
+                            "</div>"
+                            "<div style='color: #6b7280; font-size: 0.95rem;'>等待检测...</div>"
+                            "</div>"
+                        )
+                    with gr.Column():
+                        detail_summary = gr.HTML(
+                            "<div class='feature-card'>"
+                            "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+                            "<span style='font-size: 1.5rem;'>🔍</span>"
+                            "<div style='font-size: 1.2rem; font-weight: 600;'>推理细节</div>"
+                            "</div>"
+                            "<div style='color: #6b7280; font-size: 0.95rem;'>等待检测...</div>"
+                            "</div>"
+                        )
 
                 with gr.Accordion("📊 详细分析结果", open=False):
-                    with gr.Row():
-                        pred_json = gr.JSON(label="预测数据", value={})
-                        details_json = gr.JSON(label="推理细节", value={})
-                    features_markdown = gr.Markdown("### 特征摘要\n- 暂无特征信息。")
-                    http_markdown = gr.Markdown("### 🌐 HTTP 信息\n- 等待检测")
-                    cookie_markdown = gr.Markdown("### 🍪 Cookie 信息\n- 等待检测")
-                    meta_markdown = gr.Markdown("### 🧩 Meta / 指纹信息\n- 等待检测")
-                    screenshot_image = gr.Image(label="页面截图", visible=False)
+                    with gr.Tabs():
+                        with gr.TabItem("🎯 核心数据"):
+                            with gr.Row():
+                                pred_json = gr.JSON(
+                                    label="📈 预测数据",
+                                    value={},
+                                    show_label=True
+                                )
+                                details_json = gr.JSON(
+                                    label="🔧 推理细节",
+                                    value={},
+                                    show_label=True
+                                )
 
-                with gr.Row():
-                    final_url = gr.Textbox(label="最终 URL", interactive=False)
-                    status_code = gr.Textbox(label="状态码", interactive=False)
-                    content_type = gr.Textbox(label="内容类型", interactive=False)
+                        with gr.TabItem("🌐 技术信息"):
+                            with gr.Row():
+                                final_url = gr.Textbox(
+                                    label="🔗 最终 URL",
+                                    interactive=False,
+                                    show_copy_button=True
+                                )
+                                status_code = gr.Textbox(
+                                    label="📊 状态码",
+                                    interactive=False
+                                )
+                                content_type = gr.Textbox(
+                                    label="📄 内容类型",
+                                    interactive=False
+                                )
+
+                        with gr.TabItem("📈 特征分析"):
+                            features_markdown = gr.HTML(
+                                "<div class='feature-card'>"
+                                "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+                                "<span style='font-size: 1.3rem;'>🧩</span>"
+                                "<div style='font-size: 1.1rem; font-weight: 600;'>特征摘要</div>"
+                                "</div>"
+                                "<div style='color: #6b7280; font-size: 0.9rem;'>暂无特征信息...</div>"
+                                "</div>"
+                            )
+
+                        with gr.TabItem("🌐 HTTP分析"):
+                            http_markdown = gr.HTML(
+                                "<div class='feature-card'>"
+                                "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+                                "<span style='font-size: 1.3rem;'>🌐</span>"
+                                "<div style='font-size: 1.1rem; font-weight: 600;'>HTTP 信息</div>"
+                                "</div>"
+                                "<div style='color: #6b7280; font-size: 0.9rem;'>等待检测...</div>"
+                                "</div>"
+                            )
+
+                        with gr.TabItem("🍪 Cookie分析"):
+                            cookie_markdown = gr.HTML(
+                                "<div class='feature-card'>"
+                                "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+                                "<span style='font-size: 1.3rem;'>🍪</span>"
+                                "<div style='font-size: 1.1rem; font-weight: 600;'>Cookie 信息</div>"
+                                "</div>"
+                                "<div style='color: #6b7280; font-size: 0.9rem;'>等待检测...</div>"
+                                "</div>"
+                            )
+
+                        with gr.TabItem("🧩 指纹分析"):
+                            meta_markdown = gr.HTML(
+                                "<div class='feature-card'>"
+                                "<div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>"
+                                "<span style='font-size: 1.3rem;'>🧩</span>"
+                                "<div style='font-size: 1.1rem; font-weight: 600;'>Meta / 指纹信息</div>"
+                                "</div>"
+                                "<div style='color: #6b7280; font-size: 0.9rem;'>等待检测...</div>"
+                                "</div>"
+                            )
+
+                        with gr.TabItem("📸 页面截图"):
+                            screenshot_image = gr.Image(
+                                label="页面截图",
+                                visible=False,
+                                show_label=True,
+                                show_download_button=True
+                            )
 
                 with gr.Accordion("🗂 历史记录", open=False):
                     with gr.Row():
-                        history_table = CompatDataFrame(
-                            headers=["时间", "URL", "综合概率", "结论"],
-                            datatype=["str", "str", "str", "str"],
-                            value=[],
-                            interactive=False,
-                        )
-                        clear_history_btn = gr.Button("🧹 清空记录", variant="secondary")
+                        with gr.Column(scale=4):
+                            history_table = gr.DataFrame(
+                                headers=["时间", "URL", "综合概率", "结论"],
+                                datatype=["str", "str", "str", "str"],
+                                value=[],
+                                interactive=False,
+                                wrap=True,
+                            )
+                        with gr.Column(scale=1):
+                            clear_history_btn = gr.Button(
+                                "🧹 清空记录",
+                                variant="secondary",
+                                size="sm"
+                            )
+                            export_history_btn = gr.Button(
+                                "📥 导出历史",
+                                variant="secondary",
+                                size="sm"
+                            )
 
             with gr.TabItem("📋 批量检测"):
-                gr.Markdown("### 批量检测多个 URL（每行一个）")
-                urls_textarea = gr.TextArea(
-                    label="输入 URL 列表",
-                    placeholder="https://example.com\nhttps://google.com",
-                    lines=8,
+                gr.HTML(
+                    """
+                    <div style='background: linear-gradient(135deg, #f3f4f6, #e5e7eb); padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;'>
+                        <h3 style='margin: 0 0 0.5rem 0; font-size: 1.3rem; color: #374151;'>📋 批量检测多个 URL</h3>
+                        <p style='margin: 0; color: #6b7280;'>每行输入一个URL，系统将依次进行安全检测分析</p>
+                    </div>
+                    """
                 )
+
                 with gr.Row():
-                    batch_screenshot_cb = gr.Checkbox(label="启用截图", value=False)
-                    batch_scan_btn = gr.Button("🚀 开始批量检测", variant="primary")
+                    with gr.Column(scale=3):
+                        urls_textarea = gr.TextArea(
+                            label="🔗 输入 URL 列表",
+                            placeholder="https://example.com\nhttps://google.com\nhttps://github.com",
+                            lines=10,
+                            show_label=True,
+                            container=True,
+                        )
+                    with gr.Column(scale=1):
+                        gr.HTML(
+                            """
+                            <div class='feature-card' style='height: 100%;'>
+                                <div style='margin-bottom: 1rem;'>
+                                    <div style='font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;'>⚙️ 检测设置</div>
+                                </div>
+                                <div style='margin-bottom: 1rem;'>
+                                    <div style='color: #6b7280; font-size: 0.9rem; margin-bottom: 0.5rem;'>批量检测选项</div>
+                                </div>
+                            </div>
+                            """
+                        )
+                        batch_screenshot_cb = gr.Checkbox(
+                            label="📸 启用截图",
+                            value=False,
+                            info="为每个URL生成截图"
+                        )
+                        batch_scan_btn = gr.Button(
+                            "🚀 开始批量检测",
+                            variant="primary",
+                            size="lg",
+                            scale=1
+                        )
+
+                        gr.HTML(
+                            """
+                            <div style='margin-top: 1rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #3b82f6;'>
+                                <div style='font-size: 0.9rem; color: #1e40af; font-weight: 600;'>💡 提示</div>
+                                <div style='font-size: 0.85rem; color: #1e3a8a; margin-top: 0.25rem;'>批量检测会消耗更多时间和资源，建议一次检测不超过50个URL</div>
+                            </div>
+                            """
+                        )
 
                 with gr.Accordion("📈 批量检测结果", open=True):
-                    batch_status = gr.Markdown("等待批量检测...")
-                    results_table = CompatDataFrame(
-                        headers=["URL", "检测结果", "风险等级", "URL 模型", "FusionDNN", "综合概率", "备注"],
+                    batch_status = gr.HTML(
+                        "<div style='text-align: center; padding: 2rem; color: #6b7280;'>"
+                        "<div style='font-size: 1.2rem; margin-bottom: 0.5rem;'>⏳ 准备批量检测</div>"
+                        "<div style='font-size: 0.95rem;'>输入URL列表后点击开始检测</div>"
+                        "</div>"
+                    )
+
+                    results_table = gr.DataFrame(
+                        headers=["URL", "检测结果", "风险等级", "URL模型", "FusionDNN", "综合概率", "处理时间"],
                         datatype=["str", "str", "str", "str", "str", "str", "str"],
                         value=[],
                         interactive=False,
+                        wrap=True,
                     )
-                    results_file = gr.File(label="下载结果", visible=False)
+
+                    with gr.Row():
+                        results_file = gr.File(
+                            label="📥 下载检测结果",
+                            visible=False,
+                            show_label=True
+                        )
+                        clear_results_btn = gr.Button(
+                            "🧹 清空结果",
+                            variant="secondary",
+                            size="sm"
+                        )
 
             with gr.TabItem("🧪 测试样例"):
-                gr.Markdown("### 选择预设样例快速评估")
-                with gr.Row():
-                    with gr.Column():
-                        gr.Markdown("#### 🚨 钓鱼网站样例")
-                        phishing_examples = CompatDataFrame(
-                            value=[],
-                            headers=["URL", "描述"],
-                            datatype=["str", "str"],
-                            interactive=False,
-                        )
-                        load_phishing_btn = gr.Button("🚨 加载钓鱼网站样例", variant="stop")
-                    with gr.Column():
-                        gr.Markdown("#### ✅ 良性网站样例")
-                        benign_examples = CompatDataFrame(
-                            value=[],
-                            headers=["URL", "描述"],
-                            datatype=["str", "str"],
-                            interactive=False,
-                        )
-                        load_benign_btn = gr.Button("✅ 加载良性网站样例", variant="primary")
-                        refresh_tables_btn = gr.Button("🔄 刷新表格数据", variant="secondary")
-
-                gr.Markdown("### 🎯 快速检测")
-                with gr.Row():
-                    test_url_input = gr.Textbox(
-                        label="选中后自动填入（亦可手工输入）",
-                        value="https://www.baidu.com",
-                    )
-                    test_screenshot_cb = gr.Checkbox(label="启用截图功能", value=False)
-                    test_scan_btn = gr.Button("🔍 开始检测", variant="primary")
-
-                with gr.Row():
-                    test_conclusion = gr.Markdown("请选择 URL 并点击检测")
-                    test_status = gr.HTML("<div style='text-align:center;padding:20px;'>⏳ 等待检测...</div>")
-
-            with gr.TabItem("ℹ️ 系统信息"):
-                gr.Markdown(
+                gr.HTML(
                     """
-                    ### 🤖 模型信息
-                    - **URL 预训练模型**：`imanoop7/bert-phishing-detector`
-                    - **FusionDNN 模型**：42 特征增强版本
-
-                    ### ⚙️ 推理配置
-                    - URL 阈值：`settings.url_phish_threshold`
-                    - Fusion 阈值：`settings.fusion_phish_threshold`
-                    - 最终阈值：`settings.final_phish_threshold`
-
-                    ### 📈 推荐流程
-                    1. 输入或批量粘贴 URL
-                    2. 查看概率拆解 & 推理细节
-                    3. 下载批量 CSV 复核/留档
+                    <div style='background: linear-gradient(135deg, #fef3c7, #fde68a); padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem; border: 1px solid #f59e0b;'>
+                        <h3 style='margin: 0 0 0.5rem 0; font-size: 1.3rem; color: #92400e;'>🧪 测试样例</h3>
+                        <p style='margin: 0; color: #78350f;'>选择预设样例快速评估系统检测能力</p>
+                    </div>
                     """
                 )
+
+                with gr.Row():
+                    with gr.Column():
+                        gr.HTML(
+                            """
+                            <div class='feature-card' style='border-left: 4px solid #ef4444;'>
+                                <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>
+                                    <span style='font-size: 1.5rem;'>🚨</span>
+                                    <div style='font-size: 1.2rem; font-weight: 600; color: #dc2626;'>钓鱼网站样例</div>
+                                </div>
+                                <div style='color: #6b7280; font-size: 0.9rem;'>真实的钓鱼网站，用于测试检测准确性</div>
+                            </div>
+                            """
+                        )
+                        phishing_examples = gr.DataFrame(
+                            value=[],
+                            headers=["URL", "描述"],
+                            datatype=["str", "str"],
+                            interactive=False,
+                        )
+                        load_phishing_btn = gr.Button(
+                            "🚨 加载钓鱼网站样例",
+                            variant="stop",
+                            size="sm"
+                        )
+
+                    with gr.Column():
+                        gr.HTML(
+                            """
+                            <div class='feature-card' style='border-left: 4px solid #22c55e;'>
+                                <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;'>
+                                    <span style='font-size: 1.5rem;'>✅</span>
+                                    <div style='font-size: 1.2rem; font-weight: 600; color: #16a34a;'>良性网站样例</div>
+                                </div>
+                                <div style='color: #6b7280; font-size: 0.9rem;'>知名安全网站，用于测试误报率</div>
+                            </div>
+                            """
+                        )
+                        benign_examples = gr.DataFrame(
+                            value=[],
+                            headers=["URL", "描述"],
+                            datatype=["str", "str"],
+                            interactive=False,
+                        )
+                        load_benign_btn = gr.Button(
+                            "✅ 加载良性网站样例",
+                            variant="primary",
+                            size="sm"
+                        )
+                        refresh_tables_btn = gr.Button(
+                            "🔄 刷新表格数据",
+                            variant="secondary",
+                            size="sm"
+                        )
+
+                gr.HTML(
+                    """
+                    <div style='background: linear-gradient(135deg, #ede9fe, #ddd6fe); padding: 1.5rem; border-radius: 12px; margin: 1.5rem 0; border: 1px solid #8b5cf6;'>
+                        <h3 style='margin: 0 0 0.5rem 0; font-size: 1.3rem; color: #5b21b6;'>🎯 快速检测</h3>
+                        <p style='margin: 0; color: #6d28d9;'>选择上方样例或手工输入URL进行检测</p>
+                    </div>
+                    """
+                )
+                with gr.Row():
+                    with gr.Column(scale=3):
+                        test_url_input = gr.Textbox(
+                            label="🔗 测试 URL",
+                            placeholder="选中表格中的URL会自动填入，或手工输入",
+                            value="https://www.baidu.com",
+                            show_label=True,
+                            container=True,
+                        )
+                    with gr.Column(scale=1):
+                        test_screenshot_cb = gr.Checkbox(
+                            label="📸 启用截图功能",
+                            value=False,
+                            info="生成页面截图"
+                        )
+                        test_scan_btn = gr.Button(
+                            "🔍 开始检测",
+                            variant="primary",
+                            size="lg"
+                        )
+
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        test_conclusion = gr.HTML(
+                            "<div class='result-section' style='text-align: center;'>"
+                            "<div style='font-size: 1.1rem; color: #6b7280; margin-bottom: 0.5rem;'>准备就绪</div>"
+                            "<div style='font-size: 1.3rem; font-weight: 600; color: #374151;'>请选择 URL 并点击检测</div>"
+                            "</div>"
+                        )
+                    with gr.Column(scale=1):
+                        test_status = gr.HTML(
+                            "<div class='status-indicator' style='background: linear-gradient(135deg, #f3f4f6, #e5e7eb); color: #6b7280;'>"
+                            "<div style='font-size: 2.5rem; margin-bottom: 0.5rem;'>⏳</div>"
+                            "<div style='font-size: 1rem; font-weight: 600;'>等待检测</div>"
+                            "</div>"
+                        )
+
+            with gr.TabItem("ℹ️ 系统信息"):
+                gr.HTML(
+                    """
+                    <div class='gradient-bg' style='background: linear-gradient(135deg, #6366f1, #8b5cf6);'>
+                        <h3 style='margin: 0 0 1rem 0; font-size: 1.5rem;'>ℹ️ 系统信息</h3>
+                        <p style='margin: 0; opacity: 0.9;'>模型版本与系统配置详情</p>
+                    </div>
+                    """
+                )
+
+                with gr.Tabs():
+                    with gr.TabItem("🤖 模型信息"):
+                        gr.HTML(
+                            """
+                            <div class='feature-card'>
+                                <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;'>
+                                    <span style='font-size: 1.5rem;'>🤖</span>
+                                    <div style='font-size: 1.3rem; font-weight: 600;'>当前模型配置</div>
+                                </div>
+
+                                <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-top: 1rem;'>
+                                    <div style='background: #f0f9ff; padding: 1rem; border-radius: 8px; border-left: 4px solid #3b82f6;'>
+                                        <div style='font-weight: 600; color: #1e40af; margin-bottom: 0.5rem;'>URL预训练模型</div>
+                                        <div style='color: #1e3a8a; font-size: 0.9rem;'>BERT-based钓鱼检测</div>
+                                        <div style='color: #64748b; font-size: 0.85rem; margin-top: 0.25rem;'>语义理解+上下文分析</div>
+                                    </div>
+
+                                    <div style='background: #f0fdf4; padding: 1rem; border-radius: 8px; border-left: 4px solid #22c55e;'>
+                                        <div style='font-weight: 600; color: #166534; margin-bottom: 0.5rem;'>FusionDNN模型 v5</div>
+                                        <div style='color: #15803d; font-size: 0.9rem;'>92特征深度融合</div>
+                                        <div style='color: #64748b; font-size: 0.85rem; margin-top: 0.25rem;'>HTTP+Cookie+Meta特征</div>
+                                    </div>
+
+                                    <div style='background: #fefce8; padding: 1rem; border-radius: 8px; border-left: 4px solid #f59e0b;'>
+                                        <div style='font-weight: 600; color: #92400e; margin-bottom: 0.5rem;'>模型性能</div>
+                                        <div style='color: #78350f; font-size: 0.9rem;'>验证集: ACC 0.973 / AUC 0.991</div>
+                                        <div style='color: #78350f; font-size: 0.9rem;'>测试集: ACC 0.975 / AUC 0.993</div>
+                                    </div>
+                                </div>
+                            </div>
+                            """
+                        )
+
+                    with gr.TabItem("⚙️ 推理配置"):
+                        gr.HTML(
+                            """
+                            <div class='feature-card'>
+                                <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;'>
+                                    <span style='font-size: 1.5rem;'>⚙️</span>
+                                    <div style='font-size: 1.3rem; font-weight: 600;'>推理阈值配置</div>
+                                </div>
+
+                                <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;'>
+                                    <div style='background: #fafafa; padding: 1rem; border-radius: 8px; border: 1px solid #e5e7eb;'>
+                                        <div style='font-weight: 600; color: #374151; margin-bottom: 0.5rem;'>URL模型阈值</div>
+                                        <div style='color: #6b7280; font-size: 0.9rem;'>动态阈值调整</div>
+                                        <div style='background: #e5e7eb; height: 4px; border-radius: 2px; margin: 0.5rem 0;'></div>
+                                        <div style='text-align: center; color: #374151; font-weight: 600;'>0.35-0.65</div>
+                                    </div>
+
+                                    <div style='background: #fafafa; padding: 1rem; border-radius: 8px; border: 1px solid #e5e7eb;'>
+                                        <div style='font-weight: 600; color: #374151; margin-bottom: 0.5rem;'>Fusion模型阈值</div>
+                                        <div style='color: #6b7280; font-size: 0.9rem;'>特征融合阈值</div>
+                                        <div style='background: #e5e7eb; height: 4px; border-radius: 2px; margin: 0.5rem 0;'></div>
+                                        <div style='text-align: center; color: #374151; font-weight: 600;'>0.45-0.75</div>
+                                    </div>
+
+                                    <div style='background: #fafafa; padding: 1rem; border-radius: 8px; border: 1px solid #e5e7eb;'>
+                                        <div style='font-weight: 600; color: #374151; margin-bottom: 0.5rem;'>最终决策阈值</div>
+                                        <div style='color: #6b7280; font-size: 0.9rem;'>综合判断阈值</div>
+                                        <div style='background: #e5e7eb; height: 4px; border-radius: 2px; margin: 0.5rem 0;'></div>
+                                        <div style='text-align: center; color: #374151; font-weight: 600;'>0.50-0.80</div>
+                                    </div>
+                                </div>
+                            </div>
+                            """
+                        )
+
+                    with gr.TabItem("📈 使用指南"):
+                        gr.HTML(
+                            """
+                            <div class='feature-card'>
+                                <div style='display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;'>
+                                    <span style='font-size: 1.5rem;'>📈</span>
+                                    <div style='font-size: 1.3rem; font-weight: 600;'>推荐使用流程</div>
+                                </div>
+
+                                <div style='background: linear-gradient(135deg, #f8fafc, #f1f5f9); padding: 1.5rem; border-radius: 12px; margin: 1rem 0;'>
+                                    <div style='font-weight: 600; color: #475569; margin-bottom: 1rem; font-size: 1.1rem;'>🔍 单URL检测流程</div>
+                                    <div style='display: flex; flex-direction: column; gap: 0.5rem;'>
+                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                                            <div style='background: #3b82f6; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>1</div>
+                                            <div style='color: #475569;'>输入或选择URL进行检测</div>
+                                        </div>
+                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                                            <div style='background: #3b82f6; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>2</div>
+                                            <div style='color: #475569;'>查看概率拆解和推理细节</div>
+                                        </div>
+                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                                            <div style='background: #3b82f6; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>3</div>
+                                            <div style='color: #475569;'>根据结果做出安全判断</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div style='background: linear-gradient(135deg, #fef3c7, #fde68a); padding: 1.5rem; border-radius: 12px; margin: 1rem 0;'>
+                                    <div style='font-weight: 600; color: #92400e; margin-bottom: 1rem; font-size: 1.1rem;'>📋 批量检测流程</div>
+                                    <div style='display: flex; flex-direction: column; gap: 0.5rem;'>
+                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                                            <div style='background: #f59e0b; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>1</div>
+                                            <div style='color: #78350f;'>批量粘贴URL列表（每行一个）</div>
+                                        </div>
+                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                                            <div style='background: #f59e0b; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>2</div>
+                                            <div style='color: #78350f;'>点击开始批量检测</div>
+                                        </div>
+                                        <div style='display: flex; align-items: center; gap: 0.5rem;'>
+                                            <div style='background: #f59e0b; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;'>3</div>
+                                            <div style='color: #78350f;'>查看详细结果并导出CSV报告</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div style='background: linear-gradient(135deg, #dcfce7, #bbf7d0); padding: 1.5rem; border-radius: 12px; margin: 1rem 0;'>
+                                    <div style='font-weight: 600; color: #166534; margin-bottom: 1rem; font-size: 1.1rem;'>💡 最佳实践建议</div>
+                                    <ul style='margin: 0; padding-left: 1.5rem; color: #15803d;'>
+                                        <li style='margin-bottom: 0.5rem;'>对于未知网站，建议开启截图功能进行更全面的分析</li>
+                                        <li style='margin-bottom: 0.5rem;'>批量检测时，建议每次不超过50个URL以确保响应速度</li>
+                                        <li style='margin-bottom: 0.5rem;'>关注HTTP响应头和Cookie设置，这些特征能有效识别威胁</li>
+                                        <li>定期查看历史记录，追踪检测模式的演变</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            """
+                        )
 
         def on_scan_click(url: str, screenshot: bool, history: List[Dict[str, Any]]):
             # 输入验证
