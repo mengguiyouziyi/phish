@@ -8,7 +8,7 @@ from ..features.render import render_screenshot
 from ..models.inference import InferencePipeline
 
 app = FastAPI(title="PhishGuard v1", version="1.0.0")
-pipe = InferencePipeline(fusion_ckpt_path="artifacts/fusion_balanced_v2.pt", enable_fusion=True)  # 使用平衡融合模型v2
+pipe = InferencePipeline(fusion_ckpt_path="artifacts/fusion_dalwfr_v5.pt", enable_fusion=True)
 
 class PredictInput(BaseModel):
     url: str = Field(..., description="待检测URL")

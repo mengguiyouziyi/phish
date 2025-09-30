@@ -71,7 +71,8 @@ test_results/
 *.bin
 *.onnx
 artifacts/
-models/
+/models/
+!phishguard_v1/models/
 
 # Logs
 *.log
@@ -81,6 +82,7 @@ logs/
 *.tmp
 *.temp
 .tmp/
+.gradio/
 
 # Jupyter Notebook
 .ipynb_checkpoints

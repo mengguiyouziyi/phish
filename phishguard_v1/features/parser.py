@@ -1,152 +1,233 @@
 from __future__ import annotations
-from bs4 import BeautifulSoup
-from urllib.parse import urlparse
-import re, json, hashlib
-from typing import Dict, Any, List
-from .url_features import url_stats
+import hashlib
+import json
+from html.parser import HTMLParser
 from pathlib import Path
+from typing import Dict, Any, List
+from urllib.parse import urlparse
 
-KEYWORDS = {k.strip() for k in Path(__file__).resolve().parents[1].joinpath("assets/rules/keywords.txt").read_text(encoding="utf-8").splitlines() if k.strip()}
-LIBS = json.loads(Path(__file__).resolve().parents[1].joinpath("assets/rules/libraries.json").read_text(encoding="utf-8"))
+from .url_features import url_stats
 
-def _bool(b): return 1 if b else 0
+
+def _asset_path(filename: str) -> Path:
+    return Path(__file__).resolve().parents[1].joinpath("assets/rules", filename)
+
+
+KEYWORDS = {
+    line.strip()
+    for line in _asset_path("keywords.txt").read_text(encoding="utf-8").splitlines()
+    if line.strip()
+}
+LIBS = json.loads(_asset_path("libraries.json").read_text(encoding="utf-8"))
+COMMON_TLDS = {"com", "org", "net", "edu", "gov", "mil", "int"}
+
+
+def _bool(flag: bool) -> int:
+    return 1 if flag else 0
+
+
+class FastHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.title_parts: List[str] = []
+        self.meta_kv: Dict[str, str] = {}
+        self.stylesheets: List[str] = []
+        self.script_srcs: List[str] = []
+        self.inline_scripts: List[str] = []
+        self.forms: List[Dict[str, str]] = []
+        self.inputs: List[Dict[str, str]] = []
+        self.anchors: List[Dict[str, str]] = []
+        self.images: List[str] = []
+        self.num_iframes = 0
+        self.num_links = 0
+        self.num_scripts = 0
+        self._in_title = False
+        self._collect_script = False
+        self._current_script: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:  # type: ignore[override]
+        attr = {k.lower(): v for k, v in attrs}
+        if tag == "title":
+            self._in_title = True
+        elif tag == "meta":
+            name = attr.get("name") or attr.get("property")
+            content = attr.get("content")
+            if name and content and name not in self.meta_kv:
+                self.meta_kv[name] = content
+        elif tag == "link":
+            self.num_links += 1
+            rel = attr.get("rel", "")
+            if "stylesheet" in rel.lower():
+                href = attr.get("href")
+                if href:
+                    self.stylesheets.append(href)
+        elif tag == "script":
+            self.num_scripts += 1
+            src = attr.get("src")
+            if src:
+                self.script_srcs.append(src)
+                self._collect_script = False
+            else:
+                self._collect_script = True
+                self._current_script = []
+        elif tag == "form":
+            self.forms.append(attr)
+        elif tag == "input":
+            self.inputs.append(attr)
+        elif tag == "iframe":
+            self.num_iframes += 1
+        elif tag == "img":
+            src = attr.get("src")
+            if src:
+                self.images.append(src)
+        elif tag == "a":
+            href = attr.get("href")
+            if href:
+                self.anchors.append(attr)
+
+    def handle_endtag(self, tag: str) -> None:  # type: ignore[override]
+        if tag == "title":
+            self._in_title = False
+        elif tag == "script" and self._collect_script:
+            script_text = "".join(self._current_script)
+            self.inline_scripts.append(script_text)
+            self._collect_script = False
+            self._current_script = []
+
+    def handle_data(self, data: str) -> None:  # type: ignore[override]
+        if self._in_title:
+            self.title_parts.append(data)
+        if self._collect_script:
+            self._current_script.append(data)
+
 
 def extract_from_html(html: str, base_url: str) -> Dict[str, Any]:
     if not html:
         return {"has_html": 0}
 
-    soup = BeautifulSoup(html, "lxml")
-    title = (soup.title.string or "").strip() if soup.title else ""
-    metas = soup.find_all("meta")
-    meta_kv = {m.get("name") or m.get("property") or "": m.get("content") or "" for m in metas if (m.get("name") or m.get("property"))}
-    links = soup.find_all("link")
-    stylesheets = [l.get("href","") for l in links if (l.get("rel") and "stylesheet" in " ".join(l.get("rel")).lower())]
-    scripts = soup.find_all("script")
-    script_srcs = [s.get("src","") for s in scripts if s.get("src")]
-    inline_scripts = [s.get_text() or "" for s in scripts if not s.get("src")]
-    iframes = soup.find_all("iframe")
-    forms = soup.find_all("form")
+    parser = FastHTMLParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        # 碰到非标准或二进制内容时直接回退为空特征
+        return {"has_html": 1, "title": "", "title_len": 0, "num_meta": 0, "num_links": 0,
+                "num_stylesheets": 0, "num_scripts": 0, "num_script_ext": 0, "num_script_inline": 0,
+                "num_iframes": 0, "num_forms": 0, "has_password_input": 0, "has_email_input": 0,
+                "suspicious_js_inline": 0, "external_form_actions": 0, "num_hidden_inputs": 0,
+                "external_links": 0, "internal_links": 0, "external_images": 0, "is_subdomain": 0,
+                "has_www": 0, "is_common_tld": 0, "meta_kv": {}, "script_srcs": [], "stylesheets": [],
+                "kw_hits": {}, "lib_hits": {}, "fingerprint_hash": ""}
 
-    # 表单 & 密码框
-    inputs = soup.find_all("input")
-    has_pwd = any((i.get("type","").lower() == "password") for i in inputs)
-    has_email = any(("email" in (i.get("type","").lower() or "") or "email" in (i.get("name","").lower() or "")) for i in inputs)
+    title = "".join(parser.title_parts).strip()
+    meta_kv = parser.meta_kv
+    stylesheets = parser.stylesheets
+    script_srcs = parser.script_srcs
+    inline_scripts = [s for s in parser.inline_scripts if s.strip()]
 
-    # 增强特征：域名年龄和信誉特征（从URL推导）
-    from urllib.parse import urlparse
     parsed_url = urlparse(base_url)
-    domain = parsed_url.netloc
-
-    # 域名特征
-    domain_parts = domain.split('.')
+    domain = parsed_url.netloc or ""
+    domain_parts = domain.split(".") if domain else []
     is_subdomain = len(domain_parts) > 2
-    has_www = domain.startswith('www.')
-
-    # TLD特征
+    has_www = domain.startswith("www.")
     tld = domain_parts[-1] if domain_parts else ""
-    common_tlds = {'com', 'org', 'net', 'edu', 'gov', 'mil', 'int'}
-    is_common_tld = tld in common_tlds
+    is_common_tld = tld in COMMON_TLDS
 
-    # 增强特征：表单分析
-    form_actions = [f.get("action", "") for f in forms if f.get("action")]
-    external_form_actions = sum(1 for action in form_actions if action and not action.startswith("/") and base_url not in action)
+    form_actions = [f.get("action", "") for f in parser.forms if f.get("action")]
+    external_form_actions = sum(
+        1
+        for action in form_actions
+        if action and not action.startswith("/") and base_url not in action
+    )
 
-    # 增强特征：隐藏字段检测
-    hidden_inputs = [i for i in inputs if i.get("type", "").lower() == "hidden"]
+    hidden_inputs = [i for i in parser.inputs if i.get("type", "").lower() == "hidden"]
     num_hidden_inputs = len(hidden_inputs)
 
-    # 增强特征：外部链接统计
-    all_links = soup.find_all("a", href=True)
-    external_links = sum(1 for link in all_links if link.get("href") and not link["href"].startswith("#") and not link["href"].startswith("/") and base_url not in link["href"])
-    internal_links = len([link for link in all_links if link.get("href") and (link["href"].startswith("/") or base_url in link["href"])])
+    external_links = sum(
+        1
+        for link in parser.anchors
+        if link.get("href")
+        and not link["href"].startswith("#")
+        and not link["href"].startswith("/")
+        and base_url not in link["href"]
+    )
+    internal_links = sum(
+        1
+        for link in parser.anchors
+        if link.get("href")
+        and (link["href"].startswith("/") or base_url in link["href"])
+    )
 
-    # 增强特征：图像分析
-    images = soup.find_all("img")
-    external_images = sum(1 for img in images if img.get("src") and not img["src"].startswith("/") and base_url not in img["src"])
+    external_images = sum(
+        1
+        for src in parser.images
+        if not src.startswith("/") and base_url not in src
+    )
 
-    # 关键词命中
+    has_pwd = any((i.get("type", "").lower() == "password") for i in parser.inputs)
+    has_email = any(
+        ("email" in (i.get("type", "").lower() or ""))
+        or ("email" in (i.get("name", "").lower() or ""))
+        for i in parser.inputs
+    )
+
     text_for_kw = " ".join([title] + list(meta_kv.values()))[:5000].lower()
-    kw_hits = {k: _bool(k in text_for_kw) for k in list(KEYWORDS)[:64]}  # 限制维度
+    kw_hits = {k: _bool(k in text_for_kw) for k in list(KEYWORDS)[:64]}
 
-    # 外部库识别
-    lib_hits = {}
+    lib_hits: Dict[str, int] = {}
     joined = " ".join(script_srcs + stylesheets).lower()
     for lib, patterns in LIBS.items():
         lib_hits[f"lib_{lib}"] = _bool(any(p in joined for p in patterns))
 
-    # 改进的可疑JS特征检测
+    high_risk = ["atob(", "fromcharcode", "unescape(", "eval(", "location.replace("]
+    medium_risk = ["document.write("]
+    whitelist = [
+        "document.write('<a href=",
+        "encodeuricomponent",
+        "window.location.href",
+    ]
+
     suspicious_js = 0
-    for sc in inline_scripts:
-        if not sc:
+    for script in inline_scripts:
+        content = script.lower()
+        if any(pat in content for pat in whitelist):
             continue
-
-        sc_lower = sc.lower()
-        script_content = sc_lower
-
-        # 白名单检查 - 排除知名网站的常见模式
-        whitelist_patterns = [
-            "document.write('<a href=",  # 百度登录链接生成
-            "encodeuricomponent",        # URL编码，常见于正常功能
-            "window.location.href",      # 正常的页面跳转
-        ]
-
-        # 如果匹配白名单模式，跳过可疑检测
-        if any(pattern in script_content for pattern in whitelist_patterns):
-            continue
-
-        # 高危可疑模式
-        high_risk_patterns = [
-            "atob(",
-            "fromcharcode",
-            "unescape(",
-            "eval(",
-            "location.replace("
-        ]
-
-        # 中危可疑模式 - 需要上下文判断
-        medium_risk_patterns = [
-            "document.write(",
-        ]
-
-        # 计算可疑分数
-        risk_score = 0
-        for pattern in high_risk_patterns:
-            if pattern in script_content:
-                risk_score += 2
-
-        for pattern in medium_risk_patterns:
-            if pattern in script_content:
-                risk_score += 1
-
-        # 只有当风险分数>=2时才计为可疑
-        if risk_score >= 2:
+        risk = sum(2 for pat in high_risk if pat in content) + sum(
+            1 for pat in medium_risk if pat in content
+        )
+        if risk >= 2:
             suspicious_js += 1
 
-    # 指纹摘要（外链域名 + meta片段）
-    ex_hosts = []
-    for u in script_srcs + stylesheets:
-        h = urlparse(u).hostname
-        if h: ex_hosts.append(h)
-    fp_basis = "|".join(sorted(set(ex_hosts)) + sorted([f"{k}:{(meta_kv.get(k) or '')[:64]}" for k in sorted(meta_kv.keys()) if k]))
-    fp_hash = hashlib.sha256(fp_basis.encode("utf-8")).hexdigest() if fp_basis else ""
+    external_hosts = []
+    for url in script_srcs + stylesheets:
+        host = urlparse(url).hostname
+        if host:
+            external_hosts.append(host)
+    fingerprint_basis = "|".join(
+        sorted(set(external_hosts))
+        + [f"{k}:{(meta_kv.get(k) or '')[:64]}" for k in sorted(meta_kv.keys()) if k]
+    )
+    fingerprint_hash = (
+        hashlib.sha256(fingerprint_basis.encode("utf-8")).hexdigest()
+        if fingerprint_basis
+        else ""
+    )
 
     return {
         "has_html": 1,
         "title": title,
         "title_len": len(title),
-        "num_meta": len(metas),
-        "num_links": len(links),
+        "num_meta": len(meta_kv),
+        "num_links": parser.num_links,
         "num_stylesheets": len(stylesheets),
-        "num_scripts": len(scripts),
+        "num_scripts": parser.num_scripts,
         "num_script_ext": len(script_srcs),
         "num_script_inline": len(inline_scripts),
-        "num_iframes": len(iframes),
-        "num_forms": len(forms),
+        "num_iframes": parser.num_iframes,
+        "num_forms": len(parser.forms),
         "has_password_input": _bool(has_pwd),
         "has_email_input": _bool(has_email),
         "suspicious_js_inline": suspicious_js,
-
-        # 新增强特征
         "external_form_actions": external_form_actions,
         "num_hidden_inputs": num_hidden_inputs,
         "external_links": external_links,
@@ -160,5 +241,5 @@ def extract_from_html(html: str, base_url: str) -> Dict[str, Any]:
         "stylesheets": stylesheets,
         "kw_hits": kw_hits,
         "lib_hits": lib_hits,
-        "fingerprint_hash": fp_hash,
+        "fingerprint_hash": fingerprint_hash,
     }

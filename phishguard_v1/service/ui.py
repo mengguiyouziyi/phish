@@ -7,9 +7,17 @@ import os
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
+import tempfile
+from pathlib import Path
 
 import gradio as gr
+import pandas as pd
 from httpx import AsyncClient
+
+try:
+    from .ui_patch import DataFrame as CompatDataFrame
+except Exception:  # pragma: no cover - 直接运行包时的导入
+    from phishguard_v1.service.ui_patch import DataFrame as CompatDataFrame
 
 from ..config import settings
 from ..features.fetcher import fetch_one
@@ -17,7 +25,85 @@ from ..features.parser import extract_from_html
 from ..features.render import render_screenshot
 from ..models.inference import InferencePipeline
 
-pipe = InferencePipeline(fusion_ckpt_path="artifacts/fusion_advanced_v3.pt", enable_fusion=True)
+pipe = InferencePipeline(fusion_ckpt_path="artifacts/fusion_dalwfr_v5.pt", enable_fusion=True)
+
+SIGNAL_FEATURES = {
+    "suspicious_js_inline": "可疑内联脚本",
+    "external_form_ratio": "外部表单占比",
+    "hidden_input_ratio": "隐藏字段密度",
+    "http_security_header_count": "安全响应头数量",
+    "http_tls_retry_flag": "TLS回退触发",
+    "cookie_secure_ratio": "Secure Cookie 占比",
+    "cookie_httponly_ratio": "HttpOnly Cookie 占比",
+    "meta_sensitive_kw_flag": "敏感关键词标记",
+    "title_entropy": "标题熵",
+    "fingerprint_hash_len": "指纹哈希长度",
+}
+
+
+def _md_escape(value: Any) -> str:
+    text = str(value) if value is not None else ""
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def build_http_summary_block(features: Dict[str, Any]) -> str:
+    lines = ["### 🌐 HTTP 信息"]
+    status = features.get("status_code")
+    if status is not None:
+        lines.append(f"- **状态码**：{status}")
+    content_type = features.get("content_type")
+    if content_type:
+        lines.append(f"- **Content-Type**：{content_type}")
+    redirects = (features.get("meta") or {}).get("redirects") or []
+    if redirects:
+        lines.append(f"- **重定向链路**：{' → '.join(_md_escape(r) for r in redirects[:5])}")
+
+    headers = features.get("headers") or {}
+    if headers:
+        lines.append("\n| Header | Value |\n| --- | --- |")
+        for key, value in list(headers.items())[:10]:
+            lines.append(f"| {_md_escape(key)} | {_md_escape(value)} |")
+    else:
+        lines.append("- 未获取到响应头 (站点可能拒绝连接或重定向至非 HTTP 页面)。")
+    return "\n".join(lines)
+
+
+def build_cookie_summary_block(features: Dict[str, Any]) -> str:
+    lines = ["### 🍪 Cookie 信息"]
+    cookies = features.get("cookies") or {}
+    set_cookie = features.get("set_cookie") or ""
+    if cookies:
+        lines.append(f"- **Cookie 总数**：{len(cookies)}")
+        lines.append("| Cookie | 值 |\n| --- | --- |")
+        for key, value in list(cookies.items())[:10]:
+            lines.append(f"| {_md_escape(key)} | {_md_escape(value)} |")
+    else:
+        lines.append("- 未检测到响应 Cookie。")
+    if set_cookie:
+        preview = _md_escape(set_cookie[:300]) + ("…" if len(set_cookie) > 300 else "")
+        lines.append(f"- **Set-Cookie 原始串（截断）**：`{preview}`")
+    return "\n".join(lines)
+
+
+def build_meta_summary_block(features: Dict[str, Any]) -> str:
+    lines = ["### 🧩 Meta / 指纹信息"]
+    html_feats = features.get("html_feats") or {}
+    meta_kv = html_feats.get("meta_kv") or {}
+    if meta_kv:
+        lines.append("| Meta 名称 | 内容 |\n| --- | --- |")
+        for key, value in list(meta_kv.items())[:10]:
+            lines.append(f"| {_md_escape(key)} | {_md_escape(value)} |")
+    else:
+        lines.append("- 未提取到 Meta 标签。")
+
+    script_srcs = html_feats.get("script_srcs") or []
+    stylesheets = html_feats.get("stylesheets") or []
+    if script_srcs or stylesheets:
+        lines.append("\n- **外部脚本**：")
+        lines.extend([f"  - {_md_escape(src)}" for src in script_srcs[:5]])
+        lines.append("- **外部样式表**：")
+        lines.extend([f"  - {_md_escape(href)}" for href in stylesheets[:5]])
+    return "\n".join(lines)
 
 
 def format_probability(prob: float) -> str:
@@ -92,6 +178,23 @@ def build_detail_summary(details: Dict[str, Any] | None) -> str:
                 for key, value in thresholds.items()
             ]
         )
+
+    snapshot = details.get("feature_snapshot")
+    if snapshot:
+        contributions = []
+        for key, label in SIGNAL_FEATURES.items():
+            val = snapshot.get(key)
+            if val is None:
+                continue
+            magnitude = abs(float(val))
+            if magnitude <= 0:
+                continue
+            contributions.append((magnitude, label, float(val)))
+        if contributions:
+            contributions.sort(reverse=True)
+            lines.append("- **关键指纹特征：**")
+            for _, label, value in contributions[:5]:
+                lines.append(f"  - {label}：{value:.2f}")
     return "\n".join(lines)
 
 
@@ -145,7 +248,13 @@ def build_history_rows(history: List[Dict[str, Any]]) -> List[List[str]]:
 def build_batch_results(results: List[Any]) -> Tuple[List[List[str]], str, Dict[str, int]]:
     headers = ["URL", "检测结果", "风险等级", "URL 模型", "FusionDNN", "综合概率", "备注"]
     rows: List[List[str]] = []
-    csv_path = f"/tmp/phish_batch_{uuid.uuid4().hex}.csv"
+    tmp_file = tempfile.NamedTemporaryFile(
+        prefix="phish_batch_",
+        suffix=".csv",
+        delete=False,
+        dir=tempfile.gettempdir(),
+    )
+    csv_path = Path(tmp_file.name)
     phish_count = 0
     error_count = 0
 
@@ -178,10 +287,23 @@ def build_batch_results(results: List[Any]) -> Tuple[List[List[str]], str, Dict[
             writer.writerow(line)
 
     stats = {"total": len(results), "phish": phish_count, "errors": error_count}
-    return rows, csv_path, stats
+    return rows, str(csv_path), stats
 
 
 async def scan_single(url: str, screenshot: bool) -> Dict[str, Any]:
+    # URL输入验证和错误处理
+    if not url or not url.strip():
+        raise ValueError("请输入有效的URL")
+
+    # 基本URL格式验证
+    url = url.strip()
+    if not (url.startswith('http://') or url.startswith('https://')):
+        # 尝试自动添加https://前缀
+        if '://' not in url:
+            url = 'https://' + url
+        else:
+            raise ValueError("URL必须以http://或https://开头")
+
     try:
         async with AsyncClient(timeout=settings.http_timeout, headers={"User-Agent": settings.user_agent}) as client:
             item = await fetch_one(url, client)
@@ -237,9 +359,30 @@ async def scan_single(url: str, screenshot: bool) -> Dict[str, Any]:
 
 
 async def scan_multiple(urls_text: str, screenshot: bool) -> List[Any]:
-    urls = [url.strip() for url in urls_text.splitlines() if url.strip()]
+    # 批量URL输入验证
+    urls = []
+    invalid_urls = []
+
+    for line in urls_text.splitlines():
+        url = line.strip()
+        if not url:
+            continue
+
+        # 基本URL格式验证
+        if not (url.startswith('http://') or url.startswith('https://')):
+            if '://' not in url:
+                url = 'https://' + url
+            else:
+                invalid_urls.append(line)
+                continue
+
+        urls.append(url)
+
     if not urls:
+        if invalid_urls:
+            raise ValueError(f"检测到 {len(invalid_urls)} 个无效的URL格式")
         return []
+
     tasks = [scan_single(url, screenshot) for url in urls]
     return await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -273,6 +416,9 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
         prob_summary = "### 概率拆解\n- 检测失败，暂无概率信息。"
         detail_summary = "### 推理细节\n- 检测失败，暂无推理细节。"
         features_text = "### 特征摘要\n- 暂无特征信息。"
+        http_summary = "### 🌐 HTTP 信息\n- 检测失败，暂无数据。"
+        cookie_summary = "### 🍪 Cookie 信息\n- 检测失败，暂无数据。"
+        meta_summary = "### 🧩 Meta / 指纹信息\n- 检测失败，暂无数据。"
         return (
             conclusion,
             status_html,
@@ -281,6 +427,9 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
             {},
             {},
             features_text,
+            http_summary,
+            cookie_summary,
+            meta_summary,
             gr.update(value=None, visible=False),
             "",
             "",
@@ -307,6 +456,9 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
     prob_summary = build_probability_summary(pred)
     detail_summary = build_detail_summary(pred.get("details"))
     features_text = create_feature_popup(features)
+    http_summary = build_http_summary_block(features)
+    cookie_summary = build_cookie_summary_block(features)
+    meta_summary = build_meta_summary_block(features)
 
     final_url = features.get("final_url") or features.get("request_url", "")
     status_code_val = str(features.get("status_code", "")) if features.get("status_code") else ""
@@ -333,6 +485,9 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
         pred,
         pred.get("details", {}),
         features_text,
+        http_summary,
+        cookie_summary,
+        meta_summary,
         screenshot_update,
         final_url,
         status_code_val,
@@ -343,8 +498,6 @@ def update_single_result(result: Any, history: List[Dict[str, Any]]) -> Tuple[
 
 
 def build_interface():
-    history_state = gr.State([])
-
     with gr.Blocks(
         title="PhishGuard v1",
         theme=gr.themes.Soft(),
@@ -352,6 +505,7 @@ def build_interface():
         .main-container {max-width: 1180px; margin: auto;}
         """,
     ) as demo:
+        history_state = gr.State([])
         gr.Markdown(
             """
             # 🛡️ PhishGuard v1 - 高级钓鱼网站检测系统
@@ -390,6 +544,9 @@ def build_interface():
                         pred_json = gr.JSON(label="预测数据", value={})
                         details_json = gr.JSON(label="推理细节", value={})
                     features_markdown = gr.Markdown("### 特征摘要\n- 暂无特征信息。")
+                    http_markdown = gr.Markdown("### 🌐 HTTP 信息\n- 等待检测")
+                    cookie_markdown = gr.Markdown("### 🍪 Cookie 信息\n- 等待检测")
+                    meta_markdown = gr.Markdown("### 🧩 Meta / 指纹信息\n- 等待检测")
                     screenshot_image = gr.Image(label="页面截图", visible=False)
 
                 with gr.Row():
@@ -399,7 +556,7 @@ def build_interface():
 
                 with gr.Accordion("🗂 历史记录", open=False):
                     with gr.Row():
-                        history_table = gr.Dataframe(
+                        history_table = CompatDataFrame(
                             headers=["时间", "URL", "综合概率", "结论"],
                             datatype=["str", "str", "str", "str"],
                             value=[],
@@ -420,7 +577,7 @@ def build_interface():
 
                 with gr.Accordion("📈 批量检测结果", open=True):
                     batch_status = gr.Markdown("等待批量检测...")
-                    results_table = gr.Dataframe(
+                    results_table = CompatDataFrame(
                         headers=["URL", "检测结果", "风险等级", "URL 模型", "FusionDNN", "综合概率", "备注"],
                         datatype=["str", "str", "str", "str", "str", "str", "str"],
                         value=[],
@@ -433,36 +590,23 @@ def build_interface():
                 with gr.Row():
                     with gr.Column():
                         gr.Markdown("#### 🚨 钓鱼网站样例")
-                        phishing_examples = gr.DataFrame(
-                            value=[
-                                ["http://verify-paypal-account.com", "假冒 PayPal 验证网站"],
-                                ["http://apple-security-update.info", "假冒 Apple 安全更新"],
-                                ["http://microsoft-login-alert.com", "假冒 Microsoft 登录警告"],
-                                ["http://amazon-gift-card-winner.com", "假冒 Amazon 中奖通知"],
-                                ["http://bank-of-america-verify.com", "假冒银行验证网站"],
-                            ],
+                        phishing_examples = CompatDataFrame(
+                            value=[],
                             headers=["URL", "描述"],
                             datatype=["str", "str"],
                             interactive=False,
-                            height=200,
                         )
                         load_phishing_btn = gr.Button("🚨 加载钓鱼网站样例", variant="stop")
                     with gr.Column():
                         gr.Markdown("#### ✅ 良性网站样例")
-                        benign_examples = gr.DataFrame(
-                            value=[
-                                ["https://www.baidu.com", "百度搜索"],
-                                ["https://www.google.com", "Google 搜索"],
-                                ["https://github.com", "GitHub 代码托管"],
-                                ["https://www.wikipedia.org", "维基百科"],
-                                ["https://www.taobao.com", "淘宝网"],
-                            ],
+                        benign_examples = CompatDataFrame(
+                            value=[],
                             headers=["URL", "描述"],
                             datatype=["str", "str"],
                             interactive=False,
-                            height=200,
                         )
                         load_benign_btn = gr.Button("✅ 加载良性网站样例", variant="primary")
+                        refresh_tables_btn = gr.Button("🔄 刷新表格数据", variant="secondary")
 
                 gr.Markdown("### 🎯 快速检测")
                 with gr.Row():
@@ -497,9 +641,17 @@ def build_interface():
                 )
 
         def on_scan_click(url: str, screenshot: bool, history: List[Dict[str, Any]]):
+            # 输入验证
+            if not url or not url.strip():
+                error_result = ValueError("请输入要检测的URL")
+                return update_single_result(error_result, history)
+
             try:
                 result = asyncio.run(scan_single(url, screenshot))
                 return update_single_result(result, history)
+            except ValueError as ve:
+                # 处理URL格式错误
+                return update_single_result(ve, history)
             except Exception as exc:
                 return update_single_result(exc, history)
 
@@ -514,6 +666,9 @@ def build_interface():
                 pred_json,
                 details_json,
                 features_markdown,
+                http_markdown,
+                cookie_markdown,
+                meta_markdown,
                 screenshot_image,
                 final_url,
                 status_code,
@@ -524,10 +679,16 @@ def build_interface():
         )
 
         def on_test_scan(url: str, screenshot: bool, history: List[Dict[str, Any]]):
-            try:
-                result = asyncio.run(scan_single(url, screenshot))
-            except Exception as exc:
-                result = exc
+            # 输入验证
+            if not url or not url.strip():
+                result = ValueError("请输入要检测的URL")
+            else:
+                try:
+                    result = asyncio.run(scan_single(url, screenshot))
+                except ValueError as ve:
+                    result = ve
+                except Exception as exc:
+                    result = exc
             (
                 conclusion,
                 status_html,
@@ -536,6 +697,9 @@ def build_interface():
                 pred_data,
                 pred_details,
                 features_text,
+                http_summary,
+                cookie_summary,
+                meta_summary,
                 screenshot_update,
                 final_url_val,
                 status_code_val,
@@ -553,6 +717,9 @@ def build_interface():
                 pred_data,
                 pred_details,
                 features_text,
+                http_summary,
+                cookie_summary,
+                meta_summary,
                 screenshot_update,
                 final_url_val,
                 status_code_val,
@@ -574,6 +741,9 @@ def build_interface():
                 pred_json,
                 details_json,
                 features_markdown,
+                http_markdown,
+                cookie_markdown,
+                meta_markdown,
                 screenshot_image,
                 final_url,
                 status_code,
@@ -589,6 +759,23 @@ def build_interface():
         clear_history_btn.click(fn=clear_history, outputs=[history_table, history_state])
 
         def on_batch_scan(urls: str, screenshot: bool):
+            # 输入验证
+            if not urls or not urls.strip():
+                return (
+                    "❌ 请输入要检测的URL列表",
+                    gr.update(value=[]),
+                    gr.update(value=None, visible=False),
+                )
+
+            # 验证URL格式
+            url_lines = [line.strip() for line in urls.splitlines() if line.strip()]
+            if not url_lines:
+                return (
+                    "❌ 未找到有效的URL",
+                    gr.update(value=[]),
+                    gr.update(value=None, visible=False),
+                )
+
             try:
                 results = asyncio.run(scan_multiple(urls, screenshot))
                 rows, csv_path, stats = build_batch_results(results)
@@ -600,6 +787,13 @@ def build_interface():
                     summary,
                     gr.update(value=rows),
                     gr.update(value=csv_path, visible=True),
+                )
+            except ValueError as ve:
+                # 处理URL格式错误
+                return (
+                    f"❌ URL格式错误：{ve}",
+                    gr.update(value=[]),
+                    gr.update(value=None, visible=False),
                 )
             except Exception as exc:
                 return (
@@ -615,27 +809,90 @@ def build_interface():
         )
 
         def load_phishing_examples():
-            examples = [
-                "http://verify-paypal-account.com",
-                "http://apple-security-update.info",
-                "http://microsoft-login-alert.com",
-                "http://amazon-gift-card-winner.com",
-                "http://bank-of-america-verify.com",
-            ]
-            return "\n".join(examples)
+            sample_data = Path("data_massive/dataset_batch1_final.parquet")
+            if sample_data.exists():
+                df = pd.read_parquet(sample_data)
+                urls = df[df["label"] == 1]["final_url"].dropna().head(50).tolist()
+                first_url = urls[0] if urls else ""
+                return "\n".join(urls), first_url, first_url
+            else:
+                fallback = [
+                    "http://verify-paypal-account.com",
+                    "http://apple-security-update.info",
+                    "http://microsoft-login-alert.com",
+                    "http://amazon-gift-card-winner.com",
+                    "http://bank-of-america-verify.com",
+                ]
+                return "\n".join(fallback), fallback[0], fallback[0]
 
         def load_benign_examples():
-            examples = [
-                "https://www.baidu.com",
-                "https://www.google.com",
-                "https://github.com",
-                "https://www.wikipedia.org",
-                "https://www.taobao.com",
-            ]
-            return "\n".join(examples)
+            sample_data = Path("data_massive/dataset_batch1_final.parquet")
+            if sample_data.exists():
+                df = pd.read_parquet(sample_data)
+                urls = df[df["label"] == 0]["final_url"].dropna().head(50).tolist()
+                first_url = urls[0] if urls else ""
+                return "\n".join(urls), first_url, first_url
+            else:
+                fallback = [
+                    "https://www.baidu.com",
+                    "https://www.google.com",
+                    "https://github.com",
+                    "https://www.wikipedia.org",
+                    "https://www.taobao.com",
+                ]
+                return "\n".join(fallback), fallback[0], fallback[0]
 
-        load_phishing_btn.click(fn=load_phishing_examples, outputs=[urls_textarea])
-        load_benign_btn.click(fn=load_benign_examples, outputs=[urls_textarea])
+        def update_tables_from_data():
+            sample_data = Path("data_massive/dataset_batch1_final.parquet")
+            if not sample_data.exists():
+                return gr.update(), gr.update()
+
+            df = pd.read_parquet(sample_data)
+
+            phishing_data = df[df["label"] == 1][["final_url", "html"]].head(50)
+            phishing_rows = []
+            for _, row in phishing_data.iterrows():
+                url = row["final_url"] or ""
+                desc = "钓鱼网站" + (f" - {len(row['html'])}字符" if pd.notna(row['html']) and len(str(row['html'])) > 0 else "")
+                phishing_rows.append([url, desc])
+
+            benign_data = df[df["label"] == 0][["final_url", "html"]].head(50)
+            benign_rows = []
+            for _, row in benign_data.iterrows():
+                url = row["final_url"] or ""
+                desc = "良性网站" + (f" - {len(row['html'])}字符" if pd.notna(row['html']) and len(str(row['html'])) > 0 else "")
+                benign_rows.append([url, desc])
+
+            return gr.update(value=phishing_rows), gr.update(value=benign_rows)
+
+        def on_select_phish(evt: gr.SelectData):
+            return evt.value, evt.value
+
+        def on_select_benign(evt: gr.SelectData):
+            return evt.value, evt.value
+
+        load_phishing_btn.click(
+            fn=load_phishing_examples,
+            outputs=[urls_textarea, url_input, test_url_input]
+        )
+        load_benign_btn.click(
+            fn=load_benign_examples,
+            outputs=[urls_textarea, url_input, test_url_input]
+        )
+
+        phishing_examples.select(
+            fn=on_select_phish,
+            outputs=[test_url_input, url_input]
+        )
+        benign_examples.select(
+            fn=on_select_benign,
+            outputs=[test_url_input, url_input]
+        )
+
+        refresh_tables_btn.click(
+            fn=update_tables_from_data,
+            outputs=[phishing_examples, benign_examples]
+        )
 
     return demo
 
