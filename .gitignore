@@ -44,35 +44,69 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Data files (large files)
-*.parquet
-*.csv
-*.json
-data/
+# Large data directories (>10MB)
+data_external/
+data_massive/
+data_processed/
+data_real/
+data_test/
+data_merged/
+data_incremental/
+data_custom/
 github_data/
 validated_github_data/
-data_enhanced/
 test_results/
+venv/
+
+# Large parquet files (>5MB)
+**/*batch*.parquet
+**/*dataset*.parquet
+**/data_*/train.parquet
+**/data_*/test.parquet
+**/data_*/val.parquet
+
+# Large CSV files (>1MB)
+**/*batch*.csv
+**/top-1m.csv
+**/urlhaus*.txt
+**/whitelist*.txt
+**/adware*.txt
+**/active_malware.csv
+
+# Large text/data files
+*.json
+*.zip
+*.tar.gz
+*.rar
+
+# Models and artifacts (keep small fusion models)
+*.pkl
+*.joblib
+*.h5
+*.pth
+*.bin
+*.onnx
+artifacts/dalwfr_runs/
+!artifacts/fusion_dalwfr_v*.pt
+!artifacts/eval_*_v*.csv
+!artifacts/manual_eval_v*.csv
+
+# Keep small model files under 500KB
+!artifacts/*_v[0-9].pt
+!artifacts/*_v1[0-9].pt
+!artifacts/*_v2[0-9].pt
+!artifacts/*_v3[0-9].pt
+!artifacts/*_v4[0-9].pt
+!artifacts/*_v5[0-9].pt
+!artifacts/eval_*_v*.csv
+!artifacts/manual_eval_v*.csv
+
+# Images and documents
 *.png
 *.jpg
 *.jpeg
 *.gif
 *.pdf
-*.zip
-*.tar.gz
-*.rar
-
-# Models and artifacts
-*.pkl
-*.joblib
-*.h5
-*.pt
-*.pth
-*.bin
-*.onnx
-artifacts/
-/models/
-!phishguard_v1/models/
 
 # Logs
 *.log
