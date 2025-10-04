@@ -38,6 +38,14 @@ class DALWFROptions:
     lr: float = 1e-3
     weight_decay: float = 1e-4
     device: Optional[str] = None
+    patience: int = 10
+    monitor: str = "auc"
+    min_delta: float = 1e-4
+    clip_norm: Optional[float] = 5.0
+    use_amp: bool = False
+    scheduler_factor: float = 0.5
+    scheduler_patience: int = 3
+    seed: Optional[int] = 42
 
 
 def _predict_uncertainty(model: FusionDNN, scaler_mean: np.ndarray, scaler_scale: np.ndarray, feature_names: List[str], pool_df: pd.DataFrame, device: str) -> np.ndarray:
@@ -82,7 +90,13 @@ def run_active_learning(
     stats: List[ActiveLearningStats] = []
 
     for round_idx in range(1, options.rounds + 1):
-        logger.info("[Round %d/%d] 标注样本数=%d, 未标注样本=%d", round_idx, options.rounds, len(labeled_df), len(unlabeled_df))
+        logger.info(
+            "[Round {}/{}] 标注样本数={} , 未标注样本={}",
+            round_idx,
+            options.rounds,
+            len(labeled_df),
+            len(unlabeled_df),
+        )
         train_df, val_df = train_test_split(
             labeled_df,
             test_size=options.val_fraction,
@@ -98,6 +112,14 @@ def run_active_learning(
             lr=options.lr,
             weight_decay=options.weight_decay,
             device=options.device,
+            patience=options.patience,
+            monitor=options.monitor,
+            min_delta=options.min_delta,
+            clip_grad_norm=options.clip_norm,
+            use_amp=options.use_amp,
+            scheduler_factor=options.scheduler_factor,
+            scheduler_patience=options.scheduler_patience,
+            seed=options.seed,
         )
 
         stats.append(
@@ -154,7 +176,7 @@ def run_active_learning(
             },
             ckpt_path,
         )
-        logger.info("已保存轮次模型 -> %s", ckpt_path)
+        logger.info("已保存轮次模型 -> {}", ckpt_path)
 
         labeled_df.to_parquet(output_dir / f"labeled_round_{round_idx}.parquet", index=False)
         unlabeled_df.to_parquet(output_dir / f"pool_round_{round_idx}.parquet", index=False)
@@ -162,7 +184,7 @@ def run_active_learning(
     stats_path = output_dir / "dalwfr_stats.json"
     with stats_path.open("w", encoding="utf-8") as f:
         json.dump([asdict(s) for s in stats], f, ensure_ascii=False, indent=2)
-    logger.info("主动学习完成，统计信息写入 %s", stats_path)
+    logger.info("主动学习完成，统计信息写入 {}", stats_path)
 
     return stats
 
@@ -181,6 +203,14 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--monitor", type=str, choices=["auc", "acc", "f1"], default="auc")
+    parser.add_argument("--min-delta", type=float, default=1e-4)
+    parser.add_argument("--clip-norm", type=float, default=5.0)
+    parser.add_argument("--use-amp", action="store_true")
+    parser.add_argument("--scheduler-factor", type=float, default=0.5)
+    parser.add_argument("--scheduler-patience", type=int, default=3)
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     options = DALWFROptions(
@@ -193,6 +223,14 @@ def main() -> None:
         lr=args.lr,
         weight_decay=args.weight_decay,
         device=args.device,
+        patience=args.patience,
+        monitor=args.monitor,
+        min_delta=args.min_delta,
+        clip_norm=args.clip_norm if args.clip_norm > 0 else None,
+        use_amp=args.use_amp,
+        scheduler_factor=args.scheduler_factor,
+        scheduler_patience=args.scheduler_patience,
+        seed=args.seed if args.seed >= 0 else None,
     )
 
     run_active_learning(

@@ -5,6 +5,8 @@ from typing import Dict, Any
 
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from phishguard_v1.features.feature_engineering import compute_feature_dict, FEATURE_COLUMNS
 
@@ -35,18 +37,174 @@ class InferencePipeline:
 
                 torch.serialization.add_safe_globals(['numpy.core.multiarray.scalar'])
                 ckpt = torch.load(fusion_ckpt_path, map_location="cpu", weights_only=False)
+                # 检查是否为高级架构模型
+                state_dict = ckpt.get('model_state_dict', ckpt)
+                is_advanced = any(key.startswith('fc') for key in state_dict.keys())
+                has_backbone = any(key.startswith("backbone") for key in state_dict.keys())
+                has_fc = any(key.startswith("fc") for key in state_dict.keys())
+
+                print(f"🔍 模型架构分析:")
+                print(f"  - 有fc层: {has_fc}")
+                print(f"  - 有backbone层: {has_backbone}")
+                print(f"  - 高级架构: {is_advanced}")
+
+                # 获取特征数量
                 if "input_features" in ckpt:
-                    if any(key.startswith('fc') for key in ckpt.get('model_state_dict', ckpt).keys()):
-                        self.fusion = AdvancedFusionDNN(num_features=ckpt["input_features"])
-                    else:
-                        self.fusion = FusionDNN(num_features=ckpt["input_features"])
+                    num_features = ckpt["input_features"]
+                    print(f"🎯 使用input_features: {num_features}")
                 elif "num_features" in ckpt:
-                    self.fusion = FusionDNN(num_features=ckpt["num_features"])
+                    num_features = ckpt["num_features"]
+                    print(f"🔧 使用num_features: {num_features}")
+                elif "model_config" in ckpt and "num_features" in ckpt["model_config"]:
+                    num_features = ckpt["model_config"]["num_features"]
+                    print(f"🏗️ 使用model_config中的num_features: {num_features}")
                 else:
-                    self.fusion = FusionDNN(num_features=len(FEATURE_COLUMNS))
+                    num_features = len(ckpt.get("feature_names", FEATURE_COLUMNS))
+                    print(f"📊 使用feature_names长度: {num_features}")
+
+                if is_advanced:
+                    # 检查是否为真实钓鱼网站训练的新模型
+                    state_dict = ckpt.get("model_state_dict", ckpt)
+                    has_backbone = any(key.startswith("backbone") for key in state_dict.keys())
+                    has_fc = any(key.startswith("fc") for key in state_dict.keys())
+                    has_fc7 = any(key.startswith("fc7") for key in state_dict.keys())
+                    has_bn5 = any(key.startswith("bn5") for key in state_dict.keys())
+
+                    print(f"🏗️ 架构分析: has_backbone={has_backbone}, has_fc={has_fc}, has_fc7={has_fc7}, has_bn5={has_bn5}")
+
+                    # 检查是否为真实钓鱼网站训练的新模型 (EnhancedPhishingDetector)
+                    if has_fc7 and has_bn5 and not has_backbone:
+                        print("🎯 创建真实钓鱼网站检测模型 (EnhancedPhishingDetector)")
+
+                        class EnhancedPhishingDetector(nn.Module):
+                            def __init__(self, input_dim):
+                                super().__init__()
+                                # 输入层
+                                self.fc1 = nn.Linear(input_dim, 1024)
+                                self.bn1 = nn.BatchNorm1d(1024)
+                                self.dropout1 = nn.Dropout(0.4)
+
+                                # 隐藏层
+                                self.fc2 = nn.Linear(1024, 512)
+                                self.bn2 = nn.BatchNorm1d(512)
+                                self.dropout2 = nn.Dropout(0.3)
+
+                                self.fc3 = nn.Linear(512, 256)
+                                self.bn3 = nn.BatchNorm1d(256)
+                                self.dropout3 = nn.Dropout(0.3)
+
+                                self.fc4 = nn.Linear(256, 128)
+                                self.bn4 = nn.BatchNorm1d(128)
+                                self.dropout4 = nn.Dropout(0.2)
+
+                                self.fc5 = nn.Linear(128, 64)
+                                self.bn5 = nn.BatchNorm1d(64)
+                                self.dropout5 = nn.Dropout(0.2)
+
+                                self.fc6 = nn.Linear(64, 32)
+                                self.bn6 = nn.BatchNorm1d(32)
+                                self.dropout6 = nn.Dropout(0.1)
+
+                                # 输出层
+                                self.fc7 = nn.Linear(32, 2)  # 2分类：合法vs钓鱼
+
+                                self._advanced = True
+
+                            def forward(self, x):
+                                x = torch.relu(self.bn1(self.fc1(x)))
+                                x = self.dropout1(x)
+
+                                x = torch.relu(self.bn2(self.fc2(x)))
+                                x = self.dropout2(x)
+
+                                x = torch.relu(self.bn3(self.fc3(x)))
+                                x = self.dropout3(x)
+
+                                x = torch.relu(self.bn4(self.fc4(x)))
+                                x = self.dropout4(x)
+
+                                x = torch.relu(self.bn5(self.fc5(x)))
+                                x = self.dropout5(x)
+
+                                x = torch.relu(self.bn6(self.fc6(x)))
+                                x = self.dropout6(x)
+
+                                x = self.fc7(x)
+                                return x
+
+                        self.fusion = EnhancedPhishingDetector(num_features)
+
+                    elif has_backbone and has_fc:
+                        print("🎯 创建高级架构模型 (忽略backbone层)")
+                        # 创建纯高级架构模型，忽略backbone层
+                        class HybridFusionDNN(nn.Module):
+                            def __init__(self, input_dim):
+                                super().__init__()
+                                # 高级架构层 - 匹配训练时的架构
+                                self.fc1 = nn.Linear(input_dim, 512)
+                                self.bn1 = nn.BatchNorm1d(512)
+                                self.dropout1 = nn.Dropout(0.3)
+                                self.fc2 = nn.Linear(512, 256)
+                                self.bn2 = nn.BatchNorm1d(256)
+                                self.dropout2 = nn.Dropout(0.3)
+                                self.fc3 = nn.Linear(256, 128)
+                                self.bn3 = nn.BatchNorm1d(128)
+                                self.dropout3 = nn.Dropout(0.2)
+                                self.fc4 = nn.Linear(128, 64)
+                                self.bn4 = nn.BatchNorm1d(64)
+                                self.dropout4 = nn.Dropout(0.2)
+                                self.fc5 = nn.Linear(64, 2)
+                                self._advanced = True
+
+                            def forward(self, x):
+                                # 使用高级架构
+                                x = self.fc1(x)
+                                x = self.bn1(x)
+                                x = F.relu(x)
+                                x = self.dropout1(x)
+                                x = self.fc2(x)
+                                x = self.bn2(x)
+                                x = F.relu(x)
+                                x = self.dropout2(x)
+                                x = self.fc3(x)
+                                x = self.bn3(x)
+                                x = F.relu(x)
+                                x = self.dropout3(x)
+                                x = self.fc4(x)
+                                x = self.bn4(x)
+                                x = F.relu(x)
+                                x = self.dropout4(x)
+                                x = self.fc5(x)
+                                return x
+
+                        self.fusion = HybridFusionDNN(num_features)
+                    else:
+                        print("🎯 创建标准高级架构模型")
+                        self.fusion = FusionDNN(num_features=num_features)
+                        self.fusion._use_advanced_architecture = True
+                        self.fusion._advanced = True
+                        # 重新初始化高级架构层
+                        self.fusion.fc1 = nn.Linear(num_features, 512)
+                        self.fusion.bn1 = nn.BatchNorm1d(512)
+                        self.fusion.dropout1 = nn.Dropout(0.3)
+                        self.fusion.fc2 = nn.Linear(512, 256)
+                        self.fusion.bn2 = nn.BatchNorm1d(256)
+                        self.fusion.dropout2 = nn.Dropout(0.3)
+                        self.fusion.fc3 = nn.Linear(256, 128)
+                        self.fusion.bn3 = nn.BatchNorm1d(128)
+                        self.fusion.dropout3 = nn.Dropout(0.2)
+                        self.fusion.fc4 = nn.Linear(128, 64)
+                        self.fusion.bn4 = nn.BatchNorm1d(64)
+                        self.fusion.dropout4 = nn.Dropout(0.2)
+                        self.fusion.fc5 = nn.Linear(64, 2)
+                else:
+                    print("🎯 创建标准架构模型")
+                    self.fusion = FusionDNN(num_features=num_features)
 
                 if "model_state_dict" in ckpt:
-                    self.fusion.load_state_dict(ckpt["model_state_dict"], strict=True)
+                    # 对于混合架构，使用strict=False忽略backbone层
+                    use_strict = not (has_backbone and has_fc)
+                    self.fusion.load_state_dict(ckpt["model_state_dict"], strict=use_strict)
                 elif "state_dict" in ckpt:
                     self.fusion.load_state_dict(ckpt["state_dict"], strict=True)
                 else:
