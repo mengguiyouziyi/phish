@@ -40,6 +40,7 @@ class FastHTMLParser(HTMLParser):
         self.images: List[str] = []
         self.num_iframes = 0
         self.num_links = 0
+        self.num_anchors = 0
         self.num_scripts = 0
         self._in_title = False
         self._collect_script = False
@@ -81,9 +82,9 @@ class FastHTMLParser(HTMLParser):
             if src:
                 self.images.append(src)
         elif tag == "a":
+            self.num_anchors += 1
             href = attr.get("href")
-            if href:
-                self.anchors.append(attr)
+            self.anchors.append(attr)
 
     def handle_endtag(self, tag: str) -> None:  # type: ignore[override]
         if tag == "title":
@@ -111,13 +112,13 @@ def extract_from_html(html: str, base_url: str) -> Dict[str, Any]:
         parser.close()
     except Exception:
         # 碰到非标准或二进制内容时直接回退为空特征
-        return {"has_html": 1, "title": "", "title_len": 0, "num_meta": 0, "num_links": 0,
+        return {"has_html": 1, "title": "", "title_len": 0, "num_meta": 0, "num_links": 0, "num_anchors": 0,
                 "num_stylesheets": 0, "num_scripts": 0, "num_script_ext": 0, "num_script_inline": 0,
                 "num_iframes": 0, "num_forms": 0, "has_password_input": 0, "has_email_input": 0,
                 "suspicious_js_inline": 0, "external_form_actions": 0, "num_hidden_inputs": 0,
                 "external_links": 0, "internal_links": 0, "external_images": 0, "is_subdomain": 0,
                 "has_www": 0, "is_common_tld": 0, "meta_kv": {}, "script_srcs": [], "stylesheets": [],
-                "kw_hits": {}, "lib_hits": {}, "fingerprint_hash": ""}
+                "kw_hits": {}, "lib_hits": {}, "fingerprint_hash": "", "anchors": []}
 
     title = "".join(parser.title_parts).strip()
     meta_kv = parser.meta_kv
@@ -218,7 +219,8 @@ def extract_from_html(html: str, base_url: str) -> Dict[str, Any]:
         "title": title,
         "title_len": len(title),
         "num_meta": len(meta_kv),
-        "num_links": parser.num_links,
+        "num_links": parser.num_anchors,
+        "num_anchors": parser.num_anchors,
         "num_stylesheets": len(stylesheets),
         "num_scripts": parser.num_scripts,
         "num_script_ext": len(script_srcs),
@@ -242,4 +244,5 @@ def extract_from_html(html: str, base_url: str) -> Dict[str, Any]:
         "kw_hits": kw_hits,
         "lib_hits": lib_hits,
         "fingerprint_hash": fingerprint_hash,
+        "anchors": parser.anchors,
     }

@@ -84,33 +84,42 @@ class InferencePipeline:
                                 self.bn1 = nn.BatchNorm1d(1024)
                                 self.dropout1 = nn.Dropout(0.4)
 
-                                # 隐藏层
-                                self.fc2 = nn.Linear(1024, 512)
-                                self.bn2 = nn.BatchNorm1d(512)
-                                self.dropout2 = nn.Dropout(0.3)
+                                # 隐藏层 - 深度网络
+                                self.fc2 = nn.Linear(1024, 768)
+                                self.bn2 = nn.BatchNorm1d(768)
+                                self.dropout2 = nn.Dropout(0.4)
 
-                                self.fc3 = nn.Linear(512, 256)
-                                self.bn3 = nn.BatchNorm1d(256)
+                                self.fc3 = nn.Linear(768, 512)
+                                self.bn3 = nn.BatchNorm1d(512)
                                 self.dropout3 = nn.Dropout(0.3)
 
-                                self.fc4 = nn.Linear(256, 128)
-                                self.bn4 = nn.BatchNorm1d(128)
-                                self.dropout4 = nn.Dropout(0.2)
+                                self.fc4 = nn.Linear(512, 384)
+                                self.bn4 = nn.BatchNorm1d(384)
+                                self.dropout4 = nn.Dropout(0.3)
 
-                                self.fc5 = nn.Linear(128, 64)
-                                self.bn5 = nn.BatchNorm1d(64)
-                                self.dropout5 = nn.Dropout(0.2)
+                                self.fc5 = nn.Linear(384, 256)
+                                self.bn5 = nn.BatchNorm1d(256)
+                                self.dropout5 = nn.Dropout(0.3)
 
-                                self.fc6 = nn.Linear(64, 32)
-                                self.bn6 = nn.BatchNorm1d(32)
-                                self.dropout6 = nn.Dropout(0.1)
+                                self.fc6 = nn.Linear(256, 128)
+                                self.bn6 = nn.BatchNorm1d(128)
+                                self.dropout6 = nn.Dropout(0.2)
+
+                                self.fc7 = nn.Linear(128, 64)
+                                self.bn7 = nn.BatchNorm1d(64)
+                                self.dropout7 = nn.Dropout(0.2)
+
+                                self.fc8 = nn.Linear(64, 32)
+                                self.bn8 = nn.BatchNorm1d(32)
+                                self.dropout8 = nn.Dropout(0.1)
 
                                 # 输出层
-                                self.fc7 = nn.Linear(32, 2)  # 2分类：合法vs钓鱼
+                                self.fc9 = nn.Linear(32, 2)  # 2分类：合法vs钓鱼
 
                                 self._advanced = True
 
                             def forward(self, x):
+                                # 深度前向传播
                                 x = torch.relu(self.bn1(self.fc1(x)))
                                 x = self.dropout1(x)
 
@@ -129,7 +138,13 @@ class InferencePipeline:
                                 x = torch.relu(self.bn6(self.fc6(x)))
                                 x = self.dropout6(x)
 
-                                x = self.fc7(x)
+                                x = torch.relu(self.bn7(self.fc7(x)))
+                                x = self.dropout7(x)
+
+                                x = torch.relu(self.bn8(self.fc8(x)))
+                                x = self.dropout8(x)
+
+                                x = self.fc9(x)
                                 return x
 
                         self.fusion = EnhancedPhishingDetector(num_features)
